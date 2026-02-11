@@ -1,0 +1,19 @@
+# Configuration for GSM8K multi-turn training with tool calling
+# Based on ppo_trainer.yaml, with multi-turn tool calling enabled
+
+defaults:
+  - /ppo_trainer  # Inherit from base ppo_trainer config
+
+# Override key settings for multi-turn tool calling
+data:
+  return_raw_chat: True  # Required for multi-turn tool calling
+
+actor_rollout_ref:
+  rollout:
+    name: sglang  # Use sglang engine for multi-turn tool calling
+    multi_turn:
+      enable: True  # Enable multi-turn tool interaction
+      max_turns: null  # null means no limit (default max_length // 3)
+      tool_config_path: examples/sglang_multiturn/config/tool_config/gsm8k_tool_config.yaml
+      format: chatml  # chatml or qwen
+
