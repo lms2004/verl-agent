@@ -360,6 +360,27 @@ class TrajectoryCollector:
                             })
                     if len(env_kwargs) == 0:
                         env_kwargs = None
+            
+            # Ensure env_kwargs matches batch_size to avoid empty observations
+            if env_kwargs is None or len(env_kwargs) == 0:
+                # Create dummy kwargs for each item in the batch
+                env_kwargs = [{
+                    'question': '',
+                    'ground_truth': '',
+                    'data_source': 'unknown',
+                } for _ in range(batch_size)]
+            elif len(env_kwargs) < batch_size:
+                # Pad with dummy kwargs if env_kwargs is shorter than batch_size
+                dummy_kw = {
+                    'question': '',
+                    'ground_truth': '',
+                    'data_source': 'unknown',
+                }
+                env_kwargs = list(env_kwargs) + [dummy_kw] * (batch_size - len(env_kwargs))
+            elif len(env_kwargs) > batch_size:
+                # Truncate if env_kwargs is longer than batch_size
+                env_kwargs = env_kwargs[:batch_size]
+            
             obs, infos = envs.reset(kwargs=env_kwargs)
 
         lenght_obs = len(obs['text']) if obs['text'] is not None else len(obs['image'])
