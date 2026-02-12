@@ -6,6 +6,7 @@ set -x
 PROJECT_DIR="$(pwd)"
 ulimit -n 65535
 
+export HF_ENDPOINT=https://hf-mirror.com
 huggingface-cli download Qwen/Qwen2.5-3B-Instruct --local-dir $PROJECT_DIR/models/Qwen/Qwen2.5-3B-Instruct
 CONFIG_PATH="$PROJECT_DIR/examples/sglang_multiturn/config"
 FSDP_STRATEGY=${FSDP_STRATEGY:-fsdp}
