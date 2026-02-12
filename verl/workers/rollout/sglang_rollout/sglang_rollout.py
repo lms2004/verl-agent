@@ -283,6 +283,12 @@ class SGLangRollout(BaseRollout):
         self.sharding_manager = None
         # offload
         if self._tp_rank == 0:
+            # Ensure event loop exists before calling release_memory_occupation
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
             self._engine.release_memory_occupation()
         self.is_sleep = True
         
