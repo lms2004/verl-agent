@@ -724,16 +724,9 @@ def make_envs(config):
     group_n = config.env.rollout.n if config.env.rollout.n > 0 else 1
     resources_per_worker = OmegaConf.to_container(config.env.resources_per_worker, resolve=True)
 
-    if "search" in env_name_str:
-        from agent_system.environments.env_package.search import build_search_envs, search_projection
-        _envs = build_search_envs(seed=config.env.seed, env_num=config.data.train_batch_size, group_n=group_n, is_train=True, env_config=config.env)
-        _val_envs = build_search_envs(seed=config.env.seed + 1000, env_num=config.data.val_batch_size, group_n=1, is_train=False, env_config=config.env)
-
-        projection_f = partial(search_projection)
-        envs = SearchEnvironmentManager(_envs, projection_f, config)
-        val_envs = SearchEnvironmentManager(_val_envs, projection_f, config)
-        return envs, val_envs
-    elif "gsm8k" in env_name_str:
+    # Check for exact matches first, then substring matches
+    # This prevents false matches (e.g., "gsm8k" matching "alfworld" if it contains "gsm8k")
+    if env_name_str == "gsm8k":
         from agent_system.environments.env_package.gsm8k import build_gsm8k_envs, gsm8k_projection
         _envs = build_gsm8k_envs(seed=config.env.seed, env_num=config.data.train_batch_size, group_n=group_n, is_train=True, env_config=config.env)
         _val_envs = build_gsm8k_envs(seed=config.env.seed + 1000, env_num=config.data.val_batch_size, group_n=1, is_train=False, env_config=config.env)
@@ -741,6 +734,15 @@ def make_envs(config):
         projection_f = partial(gsm8k_projection)
         envs = GSM8KEnvironmentManager(_envs, projection_f, config)
         val_envs = GSM8KEnvironmentManager(_val_envs, projection_f, config)
+        return envs, val_envs
+    elif "search" in env_name_str:
+        from agent_system.environments.env_package.search import build_search_envs, search_projection
+        _envs = build_search_envs(seed=config.env.seed, env_num=config.data.train_batch_size, group_n=group_n, is_train=True, env_config=config.env)
+        _val_envs = build_search_envs(seed=config.env.seed + 1000, env_num=config.data.val_batch_size, group_n=1, is_train=False, env_config=config.env)
+
+        projection_f = partial(search_projection)
+        envs = SearchEnvironmentManager(_envs, projection_f, config)
+        val_envs = SearchEnvironmentManager(_val_envs, projection_f, config)
         return envs, val_envs
     elif "gym_cards" in env_name_str:
         from agent_system.environments.env_package.gym_cards import build_gymcards_envs, gym_projection
