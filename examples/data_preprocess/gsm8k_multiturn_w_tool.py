@@ -93,6 +93,12 @@ if __name__ == "__main__":
                         },
                     },
                 },
+                # Add env_kwargs for environment-based training
+                "env_kwargs": {
+                    "ground_truth": solution,
+                    "question": question_raw,
+                    "data_source": data_source,
+                },
             }
             return data
 
