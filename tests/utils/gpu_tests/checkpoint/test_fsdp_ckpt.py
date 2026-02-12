@@ -36,7 +36,7 @@ def test_fsdp_ckpt(strategy="fsdp"):
     config = Qwen2Config(num_hidden_layers=1)
 
     with torch.device("cuda"):
-        model = AutoModelForCausalLM.from_config(config=config, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2")
+        model = AutoModelForCausalLM.from_config(config=config, torch_dtype=torch.bfloat16, attn_implementation="sdpa")
         model = model.to(device="cuda")
 
     # Wrap model with FSDP

@@ -80,7 +80,7 @@ vllm & vllm-ascend
 | liger-kernel | not supported |
 +--------------+---------------+
 
-1. 支持通过 transformers 使能 --flash_attention_2， transformers 需大于等于 4.52.0版本。
+1. 支持通过 transformers 使能 --sdpa， transformers 需大于等于 4.52.0版本。
 2. 不支持通过 flash_attn 使能 flash attention 加速。
 3. 不支持 liger-kernel 使能。
 
