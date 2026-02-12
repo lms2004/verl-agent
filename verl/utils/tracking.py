@@ -216,6 +216,11 @@ class _WandbLoggingAdapter:
         import wandb
 
         wandb.log(data, step=step)
+    
+    def finish(self, exit_code=0):
+        import wandb
+
+        wandb.finish(exit_code=exit_code)
 
 
 class _MlflowLoggingAdapter:
