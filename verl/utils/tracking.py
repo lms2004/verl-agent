@@ -52,7 +52,7 @@ class Tracking:
             import wandb
 
             wandb.init(project=project_name, name=experiment_name, config=config)
-            self.logger["wandb"] = wandb
+            self.logger["wandb"] = _WandbLoggingAdapter()
 
         if "mlflow" in default_backend:
             import os
@@ -209,6 +209,13 @@ class _TensorboardAdapter:
 
     def finish(self):
         self.writer.close()
+
+
+class _WandbLoggingAdapter:
+    def log(self, data, step):
+        import wandb
+
+        wandb.log(data, step=step)
 
 
 class _MlflowLoggingAdapter:
