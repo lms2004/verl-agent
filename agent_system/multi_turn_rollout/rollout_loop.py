@@ -129,12 +129,22 @@ class TrajectoryCollector:
         else:
             raw_prompt = prompt_with_chat_template
         
+        # For multi-turn rollouts, if truncation is 'error' but sequence is too long,
+        # use 'left' truncation to keep the most recent content instead of raising an error
+        truncation_strategy = self.config.data.truncation
+        if truncation_strategy == "error":
+            # Check if the prompt would exceed max_length
+            test_input_ids = self.tokenizer.encode(prompt_with_chat_template, add_special_tokens=False)
+            if len(test_input_ids) > self.config.data.max_prompt_length:
+                # In multi-turn scenarios, use left truncation to keep recent content
+                truncation_strategy = "left"
+        
         input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(prompt=prompt_with_chat_template,
                                                                             tokenizer=self.tokenizer,
                                                                             max_length=self.config.data.max_prompt_length,
                                                                             pad_token_id=self.tokenizer.pad_token_id,
                                                                             left_pad=True,
-                                                                            truncation=self.config.data.truncation,)
+                                                                            truncation=truncation_strategy,)
         
         
 
@@ -160,15 +170,16 @@ class TrajectoryCollector:
 
         raw_prompt_ids = self.tokenizer.encode(raw_prompt, add_special_tokens=False)
         if len(raw_prompt_ids) > self.config.data.max_prompt_length:
-            if self.config.data.truncation == "left":
+            # Use the same truncation strategy as above (may have been adjusted from 'error' to 'left')
+            if truncation_strategy == "left":
                 raw_prompt_ids = raw_prompt_ids[-self.config.data.max_prompt_length :]
-            elif self.config.data.truncation == "right":
+            elif truncation_strategy == "right":
                 raw_prompt_ids = raw_prompt_ids[: self.config.data.max_prompt_length]
-            elif self.config.data.truncation == "middle":
+            elif truncation_strategy == "middle":
                 left_half = self.config.data.max_prompt_length // 2
                 right_half = self.config.data.max_prompt_length - left_half
                 raw_prompt_ids = raw_prompt_ids[:left_half] + raw_prompt_ids[-right_half:]
-            elif self.config.data.truncation == "error":
+            elif truncation_strategy == "error":
                 raise RuntimeError(f"Prompt length {len(raw_prompt_ids)} is longer than {self.config.data.max_prompt_length}.")
 
         # Build final output dict
