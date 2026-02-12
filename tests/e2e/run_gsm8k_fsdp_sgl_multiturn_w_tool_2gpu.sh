@@ -22,6 +22,7 @@ FSDP_STRATEGY=${FSDP_STRATEGY:-fsdp}
 python3 -m verl.trainer.main_ppo \
     --config-path="$CONFIG_PATH" \
     --config-name='gsm8k_multiturn_grpo' \
+    env.env_name=gsm8k \
     algorithm.adv_estimator=grpo \
     data.train_batch_size=64 \
     data.max_prompt_length=1024 \

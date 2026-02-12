@@ -13,6 +13,8 @@ data:
 # The environment manages the state and tracks tool calls
 env:
   env_name: gsm8k  # Use GSM8K environment for dataset-based training
+  # Remove alfworld-specific configs that are not needed
+  alfworld: null
 
 actor_rollout_ref:
   rollout:
