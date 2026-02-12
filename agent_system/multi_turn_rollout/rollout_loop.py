@@ -415,8 +415,14 @@ class TrajectoryCollector:
         episode_rewards = np.zeros(batch_size, dtype=np.float32)
         tool_callings = np.zeros(batch_size, dtype=np.float32)
         # Trajectory collection loop
+        print(f"[Rollout] Starting multi-turn rollout loop (max_steps={self.config.env.max_steps}, batch_size={batch_size})")
         for _step in range(self.config.env.max_steps):
             active_masks = np.logical_not(is_done)
+            active_count = np.sum(active_masks)
+            if active_count == 0:
+                print(f"[Rollout] All environments done at step {_step}")
+                break
+            print(f"[Rollout] Step {_step + 1}/{self.config.env.max_steps}: {active_count}/{batch_size} environments active")
 
             batch = self.preprocess_batch(gen_batch=gen_batch, obs=obs)
 
@@ -437,7 +443,9 @@ class TrajectoryCollector:
 
             # pad to be divisible by dp_size
             batch_input_padded, pad_size = pad_dataproto_to_divisor(batch_input, actor_rollout_wg.world_size)
+            print(f"[Rollout] Step {_step + 1}: Generating sequences (batch_size={len(batch_input_padded.batch)})...")
             batch_output_padded = actor_rollout_wg.generate_sequences(batch_input_padded)
+            print(f"[Rollout] Step {_step + 1}: Sequences generated successfully")
             # # unpad
             batch_output = unpad_dataproto(batch_output_padded, pad_size=pad_size)
 

@@ -1037,14 +1037,31 @@ class RayPPOTrainer:
             if self.config.trainer.get("val_only", False):
                 return
 
-        # add tqdm
-        progress_bar = tqdm(total=self.total_training_steps, initial=self.global_steps, desc="Training Progress")
+        # add tqdm - use dataset-based progress if total_training_steps is too small
+        total_batches = len(self.train_dataloader)
+        total_samples = total_batches * self.config.data.train_batch_size if hasattr(self.config.data, 'train_batch_size') else total_batches
+        total_epochs = self.config.trainer.total_epochs
+        
+        # If total_training_steps is very small (like 1 for testing), use dataset-based progress
+        if self.total_training_steps <= 10:
+            # Use dataset-based progress: show epoch and batch progress
+            progress_total = total_epochs * total_batches
+            progress_bar = tqdm(
+                total=progress_total, 
+                initial=0, 
+                desc=f"Training Progress (Epoch 1/{total_epochs}, Batch 0/{total_batches})",
+                unit="batch"
+            )
+        else:
+            # Use step-based progress for normal training
+            progress_bar = tqdm(total=self.total_training_steps, initial=self.global_steps, desc="Training Progress")
 
         # we start from step 1
         self.global_steps += 1
         last_val_metrics = None
 
         for epoch in range(self.config.trainer.total_epochs):
+            batch_idx = 0
             for batch_dict in self.train_dataloader:
                 metrics = {}
                 timing_raw = {}
@@ -1296,7 +1313,16 @@ class RayPPOTrainer:
                 # TODO: make a canonical logger that supports various backend
                 logger.log(data=metrics, step=self.global_steps)
 
-                progress_bar.update(1)
+                # Update progress bar with dataset-based info if using dataset progress
+                if self.total_training_steps <= 10:
+                    batch_idx += 1
+                    progress_bar.set_description(
+                        f"Training Progress (Epoch {epoch+1}/{total_epochs}, Batch {batch_idx}/{total_batches}, Step {self.global_steps})"
+                    )
+                    progress_bar.update(1)
+                else:
+                    progress_bar.update(1)
+                
                 self.global_steps += 1
                 if is_last_step:
                     pprint(f"Final validation metrics: {last_val_metrics}")
