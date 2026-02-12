@@ -2,6 +2,7 @@ import json
 import warnings
 from typing import List, Optional
 import argparse
+import threading
 
 import faiss
 import torch
@@ -200,6 +201,9 @@ class DenseRetriever(BaseRetriever):
     def __init__(self, config):
         super().__init__(config)
         self.index = faiss.read_index(self.index_path)
+        # Thread lock for Faiss GPU operations (Faiss GPU is not thread-safe)
+        self.faiss_lock = threading.Lock()
+        
         if config.faiss_gpu:
             if config.faiss_gpu_id is not None:
                 # Check GPU availability
@@ -236,7 +240,9 @@ class DenseRetriever(BaseRetriever):
         if num is None:
             num = self.topk
         query_emb = self.encoder.encode(query)
-        scores, idxs = self.index.search(query_emb, k=num)
+        # Use lock to ensure thread-safe access to Faiss GPU index
+        with self.faiss_lock:
+            scores, idxs = self.index.search(query_emb, k=num)
         idxs = idxs[0]
         scores = scores[0]
         results = load_docs(self.corpus, idxs)
@@ -256,7 +262,9 @@ class DenseRetriever(BaseRetriever):
         for start_idx in range(0, len(query_list), self.batch_size):
             query_batch = query_list[start_idx : start_idx + self.batch_size]
             batch_emb = self.encoder.encode(query_batch)
-            batch_scores, batch_idxs = self.index.search(batch_emb, k=num)
+            # Use lock to ensure thread-safe access to Faiss GPU index
+            with self.faiss_lock:
+                batch_scores, batch_idxs = self.index.search(batch_emb, k=num)
 
             batch_scores = batch_scores.tolist()
             batch_idxs = batch_idxs.tolist()
@@ -413,4 +421,6 @@ if __name__ == "__main__":
     retriever = get_retriever(config)
 
     # 3) Launch the server. By default, it listens on http://127.0.0.1:8000
-    uvicorn.run(app, host="0.0.0.0", port=args.port)
+    # Use workers=1 to avoid multiple processes accessing the same Faiss GPU index
+    # This prevents Faiss GPU memory stack assertion errors
+    uvicorn.run(app, host="0.0.0.0", port=args.port, workers=1)
