@@ -11,6 +11,9 @@ mode="mean_std_norm" # "mean_norm" or "mean_std_norm"
 enable_similarity=True # enable similarity-based GiGPO
 similarity_thresh=0.9 # similarity threshold for GiGPO
 
+# Model path configuration
+MODEL_PATH="./models/Qwen/Qwen2.5-3B-Instruct"  # 本地小模型路径，请根据实际情况修改
+
 TRAIN_DATA="./data/searchR1_processed_direct/train.parquet"
 VAL_DATA="./data/searchR1_processed_direct/test.parquet"
 
@@ -25,7 +28,7 @@ python3 -m verl.trainer.main_ppo \
     data.filter_overlong_prompts=True \
     data.truncation='left' \
     data.return_raw_chat=True \
-    actor_rollout_ref.model.path=Qwen/Qwen2.5-7B-Instruct \
+    actor_rollout_ref.model.path=$MODEL_PATH \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=0.1 \
     actor_rollout_ref.model.use_remove_padding=True \
@@ -65,7 +68,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_search' \
     trainer.experiment_name='gigpo_sim0.9_qwen2.5_7b_instruct' \
-    trainer.n_gpus_per_node=8 \
+    trainer.n_gpus_per_node=1 \
     trainer.nnodes=1 \
     trainer.save_freq=50 \
     trainer.test_freq=50 \
