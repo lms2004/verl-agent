@@ -68,6 +68,30 @@ class TrajectoryCollector:
         self.rollout_log_fp = None
         print(f"[Rollout] Logging rollout details to: {self.rollout_log_file}")
     
+    def _convert_to_json_serializable(self, obj):
+        """Recursively convert NumPy arrays and other non-serializable types to JSON-serializable formats"""
+        if obj is None:
+            return None
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, (np.integer, np.int8, np.int16, np.int32, np.int64)):
+            return int(obj.item())
+        elif isinstance(obj, (np.floating, np.float16, np.float32, np.float64)):
+            return float(obj.item())
+        elif isinstance(obj, (np.bool_, bool)):
+            return bool(obj)
+        elif isinstance(obj, dict):
+            return {str(key): self._convert_to_json_serializable(value) for key, value in obj.items()}
+        elif isinstance(obj, (list, tuple, set)):
+            return [self._convert_to_json_serializable(item) for item in obj]
+        elif isinstance(obj, torch.Tensor):
+            return obj.cpu().numpy().tolist()
+        elif isinstance(obj, (int, float, str, bool)):
+            return obj
+        else:
+            # For any other type, convert to string
+            return str(obj)
+    
     def _log_rollout_step(self, step, batch_output, text_actions, rewards, dones, infos, 
                          tool_callings, episode_rewards, episode_lengths, gen_time, 
                          avg_response_len, total_tokens, active_masks):
@@ -100,26 +124,27 @@ class TrajectoryCollector:
         # Extract tool calling information
         tool_calling_details = []
         for i, info in enumerate(infos):
+            # Convert info dict to JSON-serializable format
             tool_info = {
                 'sample_idx': i,
-                'tool_calling': info.get('tool_calling', 0),
-                'is_action_valid': info.get('is_action_valid', True),
+                'tool_calling': self._convert_to_json_serializable(info.get('tool_calling', 0)),
+                'is_action_valid': self._convert_to_json_serializable(info.get('is_action_valid', True)),
             }
             # Add any additional tool-related info
             if 'tool_name' in info:
-                tool_info['tool_name'] = info['tool_name']
+                tool_info['tool_name'] = str(info['tool_name'])
             if 'tool_args' in info:
-                tool_info['tool_args'] = info['tool_args']
+                tool_info['tool_args'] = self._convert_to_json_serializable(info['tool_args'])
             if 'tool_result' in info:
                 tool_info['tool_result'] = str(info['tool_result'])[:500]  # Truncate long results
             tool_calling_details.append(tool_info)
         
-        # Create log entry
+        # Create log entry - convert all values to ensure JSON serializability
         log_entry = {
-            'step': step,
+            'step': int(step),
             'timestamp': datetime.now().isoformat(),
-            'batch_size': len(text_actions),
-            'active_count': int(np.sum(active_masks)),
+            'batch_size': int(len(text_actions)),
+            'active_count': int(np.sum(active_masks)) if isinstance(active_masks, np.ndarray) else int(sum(active_masks)),
             'generation_stats': {
                 'avg_response_length': float(avg_response_len),
                 'total_tokens': int(total_tokens),
@@ -127,19 +152,19 @@ class TrajectoryCollector:
                 'tokens_per_second': float(total_tokens / gen_time) if gen_time > 0 else 0.0,
             },
             'rewards': {
-                'step_rewards': rewards.tolist() if isinstance(rewards, np.ndarray) else rewards,
+                'step_rewards': self._convert_to_json_serializable(rewards),
                 'avg_reward': float(np.mean(rewards[active_masks])) if np.any(active_masks) else 0.0,
-                'episode_rewards': episode_rewards.tolist() if isinstance(episode_rewards, np.ndarray) else episode_rewards,
+                'episode_rewards': self._convert_to_json_serializable(episode_rewards),
                 'avg_episode_reward': float(np.mean(episode_rewards[active_masks])) if np.any(active_masks) else 0.0,
             },
             'episode_stats': {
-                'episode_lengths': episode_lengths.tolist() if isinstance(episode_lengths, np.ndarray) else episode_lengths,
+                'episode_lengths': self._convert_to_json_serializable(episode_lengths),
                 'avg_episode_length': float(np.mean(episode_lengths[active_masks])) if np.any(active_masks) else 0.0,
-                'done_count': int(np.sum(dones)),
+                'done_count': int(np.sum(dones)) if isinstance(dones, np.ndarray) else int(sum(dones)),
             },
             'tool_calling': {
-                'total_tool_calls': int(np.sum(tool_callings)),
-                'current_step_tool_calls': int(np.sum([info.get('tool_calling', 0) for info in infos])),
+                'total_tool_calls': int(np.sum(tool_callings)) if isinstance(tool_callings, np.ndarray) else int(sum(tool_callings)),
+                'current_step_tool_calls': int(np.sum([self._convert_to_json_serializable(info.get('tool_calling', 0)) for info in infos])),
                 'details': tool_calling_details,
             },
             'samples': []
@@ -148,10 +173,10 @@ class TrajectoryCollector:
         # Add per-sample details
         for i in range(len(text_actions)):
             sample_entry = {
-                'sample_idx': i,
+                'sample_idx': int(i),
                 'active': bool(active_masks[i]) if i < len(active_masks) else False,
-                'prompt': prompts[i] if i < len(prompts) else '',
-                'response': text_actions[i] if i < len(text_actions) else '',
+                'prompt': str(prompts[i]) if i < len(prompts) else '',
+                'response': str(text_actions[i]) if i < len(text_actions) else '',
                 'reward': float(rewards[i]) if i < len(rewards) else 0.0,
                 'episode_reward': float(episode_rewards[i]) if i < len(episode_rewards) else 0.0,
                 'episode_length': int(episode_lengths[i]) if i < len(episode_lengths) else 0,
@@ -159,6 +184,9 @@ class TrajectoryCollector:
                 'tool_calling': tool_calling_details[i] if i < len(tool_calling_details) else {},
             }
             log_entry['samples'].append(sample_entry)
+        
+        # Convert all NumPy arrays and other non-serializable types to JSON-serializable formats
+        log_entry = self._convert_to_json_serializable(log_entry)
         
         # Write to log file
         self.rollout_log_fp.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
