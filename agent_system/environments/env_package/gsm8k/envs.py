@@ -174,10 +174,13 @@ class GSM8KMultiProcessEnv(gym.Env):
         """Close all environments."""
         if getattr(self, "_closed", False):
             return
-        self._executor.shutdown(wait=True)
-        self._loop.close()
+        if hasattr(self, "_executor") and self._executor is not None:
+            self._executor.shutdown(wait=True)
+        if hasattr(self, "_loop") and self._loop is not None:
+            self._loop.close()
         self._closed = True
-        self.env_states = [None] * self.batch_size
+        if hasattr(self, "batch_size"):
+            self.env_states = [None] * self.batch_size
 
     def __del__(self):
         self.close()

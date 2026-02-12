@@ -728,8 +728,10 @@ def make_envs(config):
     # This prevents false matches (e.g., "gsm8k" matching "alfworld" if it contains "gsm8k")
     if env_name_str == "gsm8k":
         from agent_system.environments.env_package.gsm8k import build_gsm8k_envs, gsm8k_projection
+        # Handle None val_batch_size by using train_batch_size as default
+        val_batch_size = config.data.val_batch_size if config.data.val_batch_size is not None else config.data.train_batch_size
         _envs = build_gsm8k_envs(seed=config.env.seed, env_num=config.data.train_batch_size, group_n=group_n, is_train=True, env_config=config.env)
-        _val_envs = build_gsm8k_envs(seed=config.env.seed + 1000, env_num=config.data.val_batch_size, group_n=1, is_train=False, env_config=config.env)
+        _val_envs = build_gsm8k_envs(seed=config.env.seed + 1000, env_num=val_batch_size, group_n=1, is_train=False, env_config=config.env)
 
         projection_f = partial(gsm8k_projection)
         envs = GSM8KEnvironmentManager(_envs, projection_f, config)
