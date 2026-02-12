@@ -604,8 +604,13 @@ def make_envs(config):
     Create enviroments 
     """ 
     # Handle null/None env_name for dataset-based training (e.g., GSM8K)
-    if config.env.env_name is None or config.env.env_name == "null" or str(config.env.env_name).lower() == "null":
+    # Check if env_name is None, null, or empty string
+    env_name = config.env.get("env_name", None)
+    if env_name is None or env_name == "null" or (isinstance(env_name, str) and env_name.lower() in ["null", "none", ""]):
         return None, None
+    
+    # Convert to string for comparison (in case it's not a string)
+    env_name_str = str(env_name).lower()
     
     # check if config.env.rollout.n is an integer
     if not isinstance(config.env.rollout.n, int):
@@ -613,7 +618,7 @@ def make_envs(config):
     group_n = config.env.rollout.n if config.env.rollout.n > 0 else 1
     resources_per_worker = OmegaConf.to_container(config.env.resources_per_worker, resolve=True)
 
-    if "search" in config.env.env_name.lower():
+    if "search" in env_name_str:
         from agent_system.environments.env_package.search import build_search_envs, search_projection
         _envs = build_search_envs(seed=config.env.seed, env_num=config.data.train_batch_size, group_n=group_n, is_train=True, env_config=config.env)
         _val_envs = build_search_envs(seed=config.env.seed + 1000, env_num=config.data.val_batch_size, group_n=1, is_train=False, env_config=config.env)
@@ -622,7 +627,7 @@ def make_envs(config):
         envs = SearchEnvironmentManager(_envs, projection_f, config)
         val_envs = SearchEnvironmentManager(_val_envs, projection_f, config)
         return envs, val_envs
-    elif "gym_cards" in config.env.env_name.lower():
+    elif "gym_cards" in env_name_str:
         from agent_system.environments.env_package.gym_cards import build_gymcards_envs, gym_projection
         _envs = build_gymcards_envs(env_name=config.env.env_name, seed=config.env.seed, env_num=config.data.train_batch_size, group_n=group_n, is_train=True, resources_per_worker=resources_per_worker)
         _val_envs = build_gymcards_envs(env_name=config.env.env_name, seed=config.env.seed + 1000, env_num=config.data.val_batch_size, group_n=1, is_train=False, resources_per_worker=resources_per_worker)
@@ -631,7 +636,7 @@ def make_envs(config):
         envs = GymCardEnvironmentManager(_envs, projection_f, config)
         val_envs = GymCardEnvironmentManager(_val_envs, projection_f, config)
         return envs, val_envs
-    elif "alfworld" in config.env.env_name.lower():
+    elif "alfworld" in env_name_str:
         from agent_system.environments.env_package.alfworld import build_alfworld_envs, alfworld_projection
         if config.env.env_name == 'alfworld/AlfredThorEnv':
             alf_config_path = os.path.join(os.path.dirname(__file__), 'env_package/alfworld/configs/config_tw.yaml')
@@ -650,7 +655,7 @@ def make_envs(config):
         envs = AlfWorldEnvironmentManager(_envs, projection_f, config)
         val_envs = AlfWorldEnvironmentManager(_val_envs, projection_f, config)
         return envs, val_envs
-    elif "sokoban" in config.env.env_name.lower():
+    elif "sokoban" in env_name_str:
         from agent_system.environments.env_package.sokoban import build_sokoban_envs, sokoban_projection
         env_kwargs = {
             'dim_room': config.env.sokoban.dim_room,
@@ -665,7 +670,7 @@ def make_envs(config):
         envs = SokobanEnvironmentManager(_envs, projection_f, config)
         val_envs = SokobanEnvironmentManager(_val_envs, projection_f, config)
         return envs, val_envs
-    elif "webshop" in config.env.env_name.lower():
+    elif "webshop" in env_name_str:
         from agent_system.environments.env_package.webshop import build_webshop_envs, webshop_projection
         if config.env.webshop.use_small:
             file_path = os.path.join(os.path.dirname(__file__), 'env_package/webshop/webshop/data/items_shuffle_1000.json')
@@ -689,7 +694,7 @@ def make_envs(config):
         import time
         time.sleep((config.data.train_batch_size * group_n + config.data.val_batch_size) * 0.1) # wait for the envs to be ready
         return envs, val_envs
-    elif "appworld" in config.env.env_name.lower():
+    elif "appworld" in env_name_str:
         from agent_system.environments.env_package.appworld import build_appworld_envs, appworld_projection
         _envs = build_appworld_envs(dataset_name='train', seed=config.env.seed, env_num=config.data.train_batch_size, group_n=group_n, start_server_id=0, resources_per_worker=resources_per_worker)
         _val_envs = build_appworld_envs(dataset_name='test_normal', seed=config.env.seed + 1000, env_num=config.data.val_batch_size, group_n=1, start_server_id=config.data.train_batch_size*group_n, resources_per_worker=resources_per_worker)

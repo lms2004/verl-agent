@@ -10,6 +10,7 @@ data:
   return_raw_chat: True  # Required for multi-turn tool calling
 
 # GSM8K training doesn't need environment, disable env loading
+# Use ~ to remove the default env_name from ppo_trainer.yaml
 env:
   env_name: null  # No environment needed for dataset-based training
 
