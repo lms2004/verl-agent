@@ -2,6 +2,7 @@
 # Based on ppo_trainer.yaml, with multi-turn tool calling enabled
 
 defaults:
+  - _self_
   - /ppo_trainer  # Inherit from base ppo_trainer config
 
 # Override key settings for multi-turn tool calling
