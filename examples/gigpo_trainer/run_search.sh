@@ -2,6 +2,33 @@ set -x
 
 ENGINE=${1:-vllm}
 
+# Auto-detect and configure GPU settings for training
+# Check if nvidia-smi is available
+if command -v nvidia-smi &> /dev/null; then
+    NUM_GPUS=$(nvidia-smi --list-gpus | wc -l)
+else
+    # Fallback: try to detect via Python
+    NUM_GPUS=$(python3 -c "import torch; print(torch.cuda.device_count())" 2>/dev/null || echo "0")
+fi
+
+# Configure GPU selection for training
+# If user sets CUDA_VISIBLE_DEVICES via environment variable, use that
+# Otherwise, auto-configure: prefer GPU 0 (to avoid conflict with retrieval server on GPU 1)
+if [ -z "$CUDA_VISIBLE_DEVICES" ]; then
+    if [ "$NUM_GPUS" -gt 1 ]; then
+        # Use GPU 0 for training (retrieval server will use GPU 1)
+        export CUDA_VISIBLE_DEVICES=0
+        echo "Auto-detected $NUM_GPUS GPU(s), using GPU 0 for training (retrieval server should use GPU 1)"
+    elif [ "$NUM_GPUS" -eq 1 ]; then
+        export CUDA_VISIBLE_DEVICES=0
+        echo "Auto-detected 1 GPU, using GPU 0 for training"
+    else
+        echo "Warning: No GPUs detected, training will use CPU (may be slow)"
+    fi
+else
+    echo "Using user-specified CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
+fi
+
 train_data_size=32
 val_data_size=64
 group_size=2

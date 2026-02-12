@@ -14,6 +14,27 @@ else
     NUM_GPUS=$(python3 -c "import torch; print(torch.cuda.device_count())" 2>/dev/null || echo "0")
 fi
 
+# Function to find GPU with lowest memory usage
+find_least_used_gpu() {
+    if command -v nvidia-smi &> /dev/null && [ "$NUM_GPUS" -gt 1 ]; then
+        # Get memory usage for each GPU and find the one with lowest usage
+        LEAST_USED_GPU=$(nvidia-smi --query-gpu=index,memory.used --format=csv,noheader,nounits | \
+            awk '{print $1, $2}' | \
+            sort -k2 -n | \
+            head -1 | \
+            awk '{print $1}')
+        echo "$LEAST_USED_GPU"
+    else
+        # Default to GPU 1 if multiple GPUs available, otherwise GPU 0
+        # This allows retrieval server to use GPU 1 while training uses GPU 0
+        if [ "$NUM_GPUS" -gt 1 ]; then
+            echo "1"
+        else
+            echo "0"
+        fi
+    fi
+}
+
 # Configure GPU settings
 # If user sets FAISS_GPU_ID or RETRIEVER_DEVICE via environment variable, use those
 # Otherwise, auto-configure based on available GPUs
@@ -21,9 +42,16 @@ USE_FAISS_GPU=false
 if [ "$NUM_GPUS" -gt 0 ]; then
     USE_FAISS_GPU=true
     if [ -z "$FAISS_GPU_ID" ]; then
-        # Default to GPU 0 if GPUs are available
-        FAISS_GPU_ID=0
-        echo "Auto-detected $NUM_GPUS GPU(s), using GPU 0 for FAISS"
+        # Auto-select GPU: prefer GPU 1 if available (to avoid conflict with training on GPU 0)
+        # Otherwise use the least used GPU
+        if [ "$NUM_GPUS" -gt 1 ]; then
+            # Prefer GPU 1 for retrieval server to avoid conflict with training
+            FAISS_GPU_ID=1
+            echo "Auto-detected $NUM_GPUS GPU(s), using GPU 1 for FAISS (to avoid conflict with training on GPU 0)"
+        else
+            FAISS_GPU_ID=0
+            echo "Auto-detected $NUM_GPUS GPU(s), using GPU 0 for FAISS"
+        fi
     else
         # Validate user-specified GPU ID
         if [ "$FAISS_GPU_ID" -ge "$NUM_GPUS" ]; then
@@ -34,8 +62,8 @@ if [ "$NUM_GPUS" -gt 0 ]; then
     fi
     
     if [ -z "$RETRIEVER_DEVICE" ]; then
-        RETRIEVER_DEVICE="cuda:0"
-        echo "Using GPU 0 for retriever encoder"
+        RETRIEVER_DEVICE="cuda:$FAISS_GPU_ID"
+        echo "Using GPU $FAISS_GPU_ID for retriever encoder"
     else
         echo "Using user-specified device: $RETRIEVER_DEVICE"
     fi
