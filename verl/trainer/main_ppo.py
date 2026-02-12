@@ -156,7 +156,9 @@ class TaskRunner:
 
         resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
 
-        assert config.actor_rollout_ref.rollout.n == 1, "In verl, actor_rollout_ref.rollout.n>1 is for GRPO. In verl+env, we keep n=1, and achieve GRPO by env.rollout.n"
+        # Only enforce n=1 when using environments. For dataset-based training (no env), n>1 is allowed for GRPO
+        if envs is not None and val_envs is not None:
+            assert config.actor_rollout_ref.rollout.n == 1, "In verl+env, we keep n=1, and achieve GRPO by env.rollout.n"
 
         from agent_system.multi_turn_rollout import TrajectoryCollector
         traj_collector = TrajectoryCollector(config=config, tokenizer=tokenizer, processor=processor)
