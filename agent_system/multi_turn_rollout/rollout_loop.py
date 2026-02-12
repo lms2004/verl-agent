@@ -293,7 +293,7 @@ class TrajectoryCollector:
         Parameters:
             gen_batch (DataProto): Initial batch with prompts to start the agent_loop
             actor_rollout_wg (WorkerGroup): Worker group containing the actor model for policy decisions
-            envs (EnvironmentManagerBase): Environment manager containing parallel environment instances
+            envs (EnvironmentManagerBase): Environment manager containing parallel environment instances (can be None for dataset-based training)
         
         Returns:
             total_batch_list (List[Dict]): List of trajectory data for each environment
@@ -305,8 +305,62 @@ class TrajectoryCollector:
 
         batch_size = len(gen_batch.batch)
 
-        # Initial observations from the environment
-        obs, infos = envs.reset(kwargs=gen_batch.non_tensor_batch.pop('env_kwargs', None))
+        # Handle dataset-based training (no environment)
+        if envs is None:
+            # For dataset-based training, create observations from gen_batch
+            # Extract prompts from gen_batch to create initial observations
+            raw_prompts = gen_batch.non_tensor_batch.get('raw_prompt', [])
+            if raw_prompts:
+                # raw_prompt is a list of chat messages
+                # For dataset training, we use the raw_prompt content directly
+                # The preprocess_single_sample will handle the chat template formatting
+                obs_texts = []
+                for prompt in raw_prompts:
+                    if isinstance(prompt, list) and len(prompt) > 0:
+                        # Extract all user messages and combine them, or use the first message
+                        # For multi-turn, we typically start with the first user message
+                        user_msg = next((msg for msg in prompt if msg.get('role') == 'user'), None)
+                        if user_msg:
+                            obs_texts.append(user_msg.get('content', ''))
+                        else:
+                            # Fallback: use first message content
+                            obs_texts.append(str(prompt[0].get('content', '')) if isinstance(prompt[0], dict) else str(prompt[0]))
+                    else:
+                        # If prompt is not a list, convert to string
+                        obs_texts.append(str(prompt))
+                obs = {
+                    'text': obs_texts,
+                    'image': None,
+                    'anchor': None
+                }
+            else:
+                # Fallback: create empty observations
+                obs = {
+                    'text': [''] * batch_size,
+                    'image': None,
+                    'anchor': None
+                }
+            infos = [{} for _ in range(batch_size)]
+        else:
+            # Initial observations from the environment
+            env_kwargs = gen_batch.non_tensor_batch.pop('env_kwargs', None)
+            # If env_kwargs is not available, try to construct it from extra_info
+            if env_kwargs is None:
+                extra_info = gen_batch.non_tensor_batch.get('extra_info', [])
+                if extra_info and len(extra_info) > 0:
+                    env_kwargs = []
+                    for info in extra_info:
+                        if isinstance(info, dict):
+                            # Try to get ground_truth from reward_model or answer
+                            ground_truth = info.get('reward_model', {}).get('ground_truth', '') if isinstance(info.get('reward_model'), dict) else info.get('answer', '')
+                            env_kwargs.append({
+                                'question': info.get('question', ''),
+                                'ground_truth': ground_truth,
+                                'data_source': info.get('data_source', 'unknown'),
+                            })
+                    if len(env_kwargs) == 0:
+                        env_kwargs = None
+            obs, infos = envs.reset(kwargs=env_kwargs)
 
         lenght_obs = len(obs['text']) if obs['text'] is not None else len(obs['image'])
         assert len(gen_batch.batch) == lenght_obs, f"gen_batch size {len(gen_batch.batch)} does not match obs size {lenght_obs}"
@@ -362,7 +416,18 @@ class TrajectoryCollector:
             
             text_actions = self.tokenizer.batch_decode(batch.batch['responses'], skip_special_tokens=True)
             
-            next_obs, rewards, dones, infos = envs.step(text_actions)
+            # Handle dataset-based training (no environment step)
+            if envs is None:
+                # For dataset-based training, we don't have environment step
+                # The rewards and dones will be computed later by reward function
+                # Create dummy next_obs, rewards, dones, infos
+                # For dataset-based training, typically we only do one step, so set dones to True
+                next_obs = obs.copy()  # Keep same observations structure for next step
+                rewards = np.zeros(batch_size, dtype=np.float32)
+                dones = np.ones(batch_size, dtype=bool)  # End after first step for dataset training
+                infos = [{'is_action_valid': True, 'tool_calling': 0} for _ in range(batch_size)]
+            else:
+                next_obs, rewards, dones, infos = envs.step(text_actions)
 
             
             if len(rewards.shape) == 2:
@@ -404,12 +469,17 @@ class TrajectoryCollector:
             if is_done.all():
                 break
         
-        success: Dict[str, np.ndarray] = envs.success_evaluator(
-                    total_infos=total_infos,
-                    total_batch_list=total_batch_list,
-                    episode_rewards=episode_rewards, 
-                    episode_lengths=episode_lengths,
-                    )
+        # Handle success evaluation for dataset-based training
+        if envs is None:
+            # For dataset-based training, create empty success dict
+            success: Dict[str, np.ndarray] = {}
+        else:
+            success: Dict[str, np.ndarray] = envs.success_evaluator(
+                        total_infos=total_infos,
+                        total_batch_list=total_batch_list,
+                        episode_rewards=episode_rewards, 
+                        episode_lengths=episode_lengths,
+                        )
         
         return total_batch_list, episode_rewards, episode_lengths, success, traj_uid, tool_callings
     

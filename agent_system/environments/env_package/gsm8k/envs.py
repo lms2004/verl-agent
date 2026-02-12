@@ -110,8 +110,12 @@ class GSM8KMultiProcessEnv(gym.Env):
         
         return obs, reward, done, info
 
-    def reset(self, kwargs: List[Dict]):
+    def reset(self, kwargs: List[Dict] | None):
         """Reset all environments with the given kwargs."""
+        # Handle None kwargs (should not happen in normal flow, but handle gracefully)
+        if kwargs is None:
+            kwargs = []
+        
         if len(kwargs) > self.batch_size:
             raise ValueError(
                 f"Got {len(kwargs)} kwarg dicts, but the env was initialised with total_envs={self.batch_size}"
