@@ -152,13 +152,10 @@ class TrajectoryCollector:
                 'tokens_per_second': float(total_tokens / gen_time) if gen_time > 0 else 0.0,
             },
             'rewards': {
-                'step_rewards': self._convert_to_json_serializable(rewards),
                 'avg_reward': float(np.mean(rewards[active_masks])) if np.any(active_masks) else 0.0,
-                'episode_rewards': self._convert_to_json_serializable(episode_rewards),
                 'avg_episode_reward': float(np.mean(episode_rewards[active_masks])) if np.any(active_masks) else 0.0,
             },
             'episode_stats': {
-                'episode_lengths': self._convert_to_json_serializable(episode_lengths),
                 'avg_episode_length': float(np.mean(episode_lengths[active_masks])) if np.any(active_masks) else 0.0,
                 'done_count': int(np.sum(dones)) if isinstance(dones, np.ndarray) else int(sum(dones)),
             },

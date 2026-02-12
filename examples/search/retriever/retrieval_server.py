@@ -32,15 +32,18 @@ def load_docs(corpus, doc_idxs):
     return results
 
 
-def load_model(model_path: str, use_fp16: bool = False):
+def load_model(model_path: str, use_fp16: bool = False, device: str = "cuda:0"):
     # model_config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
     model = AutoModel.from_pretrained(model_path, trust_remote_code=True)
     model.eval()
-    model.cuda()
+    if device.startswith("cuda"):
+        model = model.to(device)
+    else:
+        model = model.to("cpu")
     if use_fp16:
         model = model.half()
     tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True, trust_remote_code=True)
-    return model, tokenizer
+    return model, tokenizer, device
 
 
 def pooling(pooler_output, last_hidden_state, attention_mask=None, pooling_method="mean"):
@@ -56,14 +59,15 @@ def pooling(pooler_output, last_hidden_state, attention_mask=None, pooling_metho
 
 
 class Encoder:
-    def __init__(self, model_name, model_path, pooling_method, max_length, use_fp16):
+    def __init__(self, model_name, model_path, pooling_method, max_length, use_fp16, device="cuda:0"):
         self.model_name = model_name
         self.model_path = model_path
         self.pooling_method = pooling_method
         self.max_length = max_length
         self.use_fp16 = use_fp16
+        self.device = device
 
-        self.model, self.tokenizer = load_model(model_path=model_path, use_fp16=use_fp16)
+        self.model, self.tokenizer, self.device = load_model(model_path=model_path, use_fp16=use_fp16, device=device)
         self.model.eval()
 
     @torch.no_grad()
@@ -87,7 +91,7 @@ class Encoder:
         inputs = self.tokenizer(
             query_list, max_length=self.max_length, padding=True, truncation=True, return_tensors="pt"
         )
-        inputs = {k: v.cuda() for k, v in inputs.items()}
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
         if "T5" in type(self.model).__name__:
             # T5-based retrieval model
@@ -197,10 +201,16 @@ class DenseRetriever(BaseRetriever):
         super().__init__(config)
         self.index = faiss.read_index(self.index_path)
         if config.faiss_gpu:
-            co = faiss.GpuMultipleClonerOptions()
-            co.useFloat16 = True
-            co.shard = True
-            self.index = faiss.index_cpu_to_all_gpus(self.index, co=co)
+            if config.faiss_gpu_id is not None:
+                # Use specific GPU
+                res = faiss.StandardGpuResources()
+                self.index = faiss.index_cpu_to_gpu(res, config.faiss_gpu_id, self.index)
+            else:
+                # Use all GPUs (original behavior)
+                co = faiss.GpuMultipleClonerOptions()
+                co.useFloat16 = True
+                co.shard = True
+                self.index = faiss.index_cpu_to_all_gpus(self.index, co=co)
 
         self.corpus = load_corpus(self.corpus_path)
         self.encoder = Encoder(
@@ -209,6 +219,7 @@ class DenseRetriever(BaseRetriever):
             pooling_method=config.retrieval_pooling_method,
             max_length=config.retrieval_query_max_length,
             use_fp16=config.retrieval_use_fp16,
+            device=config.device,
         )
         self.topk = config.retrieval_topk
         self.batch_size = config.retrieval_batch_size
@@ -281,6 +292,8 @@ class Config:
         dataset_path: str = "./data",
         data_split: str = "train",
         faiss_gpu: bool = True,
+        faiss_gpu_id: Optional[int] = None,
+        device: str = "cuda:0",
         retrieval_model_path: str = "./model",
         retrieval_pooling_method: str = "mean",
         retrieval_query_max_length: int = 256,
@@ -294,6 +307,8 @@ class Config:
         self.dataset_path = dataset_path
         self.data_split = data_split
         self.faiss_gpu = faiss_gpu
+        self.faiss_gpu_id = faiss_gpu_id
+        self.device = device
         self.retrieval_model_path = retrieval_model_path
         self.retrieval_pooling_method = retrieval_pooling_method
         self.retrieval_query_max_length = retrieval_query_max_length
@@ -362,7 +377,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--retriever_model", type=str, default="intfloat/e5-base-v2", help="Path of the retriever model."
     )
-    parser.add_argument("--faiss_gpu", action="store_true", help="Use GPU for computation")
+    parser.add_argument("--faiss_gpu", action="store_true", help="Use GPU for FAISS computation")
+    parser.add_argument("--faiss_gpu_id", type=int, default=None, help="Specific GPU ID for FAISS (e.g., 1). If not set and --faiss_gpu is True, uses all GPUs.")
+    parser.add_argument("--device", type=str, default="cuda:0", help="Device for encoder model (e.g., 'cuda:1' or 'cpu')")
     parser.add_argument("--port", type=int, default=8000, help="Port to run the FastAPI server on.")
 
     args = parser.parse_args()
@@ -375,6 +392,8 @@ if __name__ == "__main__":
         corpus_path=args.corpus_path,
         retrieval_topk=args.topk,
         faiss_gpu=args.faiss_gpu,
+        faiss_gpu_id=args.faiss_gpu_id,
+        device=args.device,
         retrieval_model_path=args.retriever_model,
         retrieval_pooling_method="mean",
         retrieval_query_max_length=256,
