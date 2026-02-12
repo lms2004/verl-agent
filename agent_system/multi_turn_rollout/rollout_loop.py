@@ -15,6 +15,10 @@
 
 import torch
 import numpy as np
+import time
+import os
+import json
+from datetime import datetime
 from verl import DataProto
 from verl.utils.dataset.rl_dataset import collate_fn
 from verl.utils.model import compute_position_id_with_mask
@@ -39,6 +43,131 @@ class TrajectoryCollector:
         self.config = config
         self.tokenizer = tokenizer
         self.processor = processor
+        
+        # Setup logging for rollout details
+        self._setup_rollout_logging()
+    
+    def _setup_rollout_logging(self):
+        """Setup logging file for rollout details"""
+        # Get log directory from config
+        log_dir = None
+        if hasattr(self.config, 'trainer'):
+            if hasattr(self.config.trainer, 'default_local_dir'):
+                log_dir = self.config.trainer.default_local_dir
+            elif hasattr(self.config.trainer, 'project_name') and hasattr(self.config.trainer, 'experiment_name'):
+                log_dir = f"checkpoints/{self.config.trainer.project_name}/{self.config.trainer.experiment_name}"
+        
+        if log_dir is None:
+            log_dir = "logs/rollout"
+        
+        os.makedirs(log_dir, exist_ok=True)
+        
+        # Create log file with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.rollout_log_file = os.path.join(log_dir, f"rollout_details_{timestamp}.jsonl")
+        self.rollout_log_fp = None
+        print(f"[Rollout] Logging rollout details to: {self.rollout_log_file}")
+    
+    def _log_rollout_step(self, step, batch_output, text_actions, rewards, dones, infos, 
+                         tool_callings, episode_rewards, episode_lengths, gen_time, 
+                         avg_response_len, total_tokens, active_masks):
+        """Log detailed information about a rollout step"""
+        if self.rollout_log_fp is None:
+            self.rollout_log_fp = open(self.rollout_log_file, 'a', encoding='utf-8')
+        
+        # Decode prompts if available
+        prompts = []
+        try:
+            if 'prompts' in batch_output.batch:
+                prompts = self.tokenizer.batch_decode(batch_output.batch['prompts'], skip_special_tokens=True)
+            elif 'input_ids' in batch_output.batch:
+                prompts = self.tokenizer.batch_decode(batch_output.batch['input_ids'], skip_special_tokens=True)
+            elif hasattr(batch_output, 'non_tensor_batch') and 'raw_prompt' in batch_output.non_tensor_batch:
+                # Fallback to raw_prompt if available
+                raw_prompts = batch_output.non_tensor_batch['raw_prompt']
+                prompts = []
+                for raw_prompt in raw_prompts:
+                    if isinstance(raw_prompt, list) and len(raw_prompt) > 0:
+                        # Extract text from chat messages
+                        prompt_text = ' '.join([msg.get('content', '') for msg in raw_prompt if isinstance(msg, dict)])
+                        prompts.append(prompt_text)
+                    else:
+                        prompts.append(str(raw_prompt))
+        except Exception as e:
+            print(f"[Rollout] Warning: Could not decode prompts: {e}")
+            prompts = [''] * len(text_actions)
+        
+        # Extract tool calling information
+        tool_calling_details = []
+        for i, info in enumerate(infos):
+            tool_info = {
+                'sample_idx': i,
+                'tool_calling': info.get('tool_calling', 0),
+                'is_action_valid': info.get('is_action_valid', True),
+            }
+            # Add any additional tool-related info
+            if 'tool_name' in info:
+                tool_info['tool_name'] = info['tool_name']
+            if 'tool_args' in info:
+                tool_info['tool_args'] = info['tool_args']
+            if 'tool_result' in info:
+                tool_info['tool_result'] = str(info['tool_result'])[:500]  # Truncate long results
+            tool_calling_details.append(tool_info)
+        
+        # Create log entry
+        log_entry = {
+            'step': step,
+            'timestamp': datetime.now().isoformat(),
+            'batch_size': len(text_actions),
+            'active_count': int(np.sum(active_masks)),
+            'generation_stats': {
+                'avg_response_length': float(avg_response_len),
+                'total_tokens': int(total_tokens),
+                'generation_time': float(gen_time),
+                'tokens_per_second': float(total_tokens / gen_time) if gen_time > 0 else 0.0,
+            },
+            'rewards': {
+                'step_rewards': rewards.tolist() if isinstance(rewards, np.ndarray) else rewards,
+                'avg_reward': float(np.mean(rewards[active_masks])) if np.any(active_masks) else 0.0,
+                'episode_rewards': episode_rewards.tolist() if isinstance(episode_rewards, np.ndarray) else episode_rewards,
+                'avg_episode_reward': float(np.mean(episode_rewards[active_masks])) if np.any(active_masks) else 0.0,
+            },
+            'episode_stats': {
+                'episode_lengths': episode_lengths.tolist() if isinstance(episode_lengths, np.ndarray) else episode_lengths,
+                'avg_episode_length': float(np.mean(episode_lengths[active_masks])) if np.any(active_masks) else 0.0,
+                'done_count': int(np.sum(dones)),
+            },
+            'tool_calling': {
+                'total_tool_calls': int(np.sum(tool_callings)),
+                'current_step_tool_calls': int(np.sum([info.get('tool_calling', 0) for info in infos])),
+                'details': tool_calling_details,
+            },
+            'samples': []
+        }
+        
+        # Add per-sample details
+        for i in range(len(text_actions)):
+            sample_entry = {
+                'sample_idx': i,
+                'active': bool(active_masks[i]) if i < len(active_masks) else False,
+                'prompt': prompts[i] if i < len(prompts) else '',
+                'response': text_actions[i] if i < len(text_actions) else '',
+                'reward': float(rewards[i]) if i < len(rewards) else 0.0,
+                'episode_reward': float(episode_rewards[i]) if i < len(episode_rewards) else 0.0,
+                'episode_length': int(episode_lengths[i]) if i < len(episode_lengths) else 0,
+                'done': bool(dones[i]) if i < len(dones) else False,
+                'tool_calling': tool_calling_details[i] if i < len(tool_calling_details) else {},
+            }
+            log_entry['samples'].append(sample_entry)
+        
+        # Write to log file
+        self.rollout_log_fp.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
+        self.rollout_log_fp.flush()  # Ensure immediate write
+    
+    def __del__(self):
+        """Close log file on destruction"""
+        if hasattr(self, 'rollout_log_fp') and self.rollout_log_fp is not None:
+            self.rollout_log_fp.close()
 
     def preprocess_single_sample(
         self,
@@ -443,9 +572,10 @@ class TrajectoryCollector:
 
             # pad to be divisible by dp_size
             batch_input_padded, pad_size = pad_dataproto_to_divisor(batch_input, actor_rollout_wg.world_size)
+            gen_start_time = time.time()
             print(f"[Rollout] Step {_step + 1}: Generating sequences (batch_size={len(batch_input_padded.batch)})...")
             batch_output_padded = actor_rollout_wg.generate_sequences(batch_input_padded)
-            print(f"[Rollout] Step {_step + 1}: Sequences generated successfully")
+            gen_time = time.time() - gen_start_time
             # # unpad
             batch_output = unpad_dataproto(batch_output_padded, pad_size=pad_size)
 
@@ -453,6 +583,33 @@ class TrajectoryCollector:
             batch.non_tensor_batch['traj_uid'] = traj_uid
 
             batch = batch.union(batch_output)
+            
+            # Calculate detailed statistics
+            if 'responses' in batch.batch:
+                responses = batch.batch['responses']
+                # Calculate response lengths (non-padding tokens)
+                if isinstance(responses, torch.Tensor):
+                    # responses is a tensor of shape [batch_size, response_length]
+                    response_length = responses.size(1) if len(responses.shape) > 1 else 1
+                    if 'attention_mask' in batch.batch:
+                        attention_mask = batch.batch['attention_mask']
+                        # Get response part of attention mask (last response_length tokens)
+                        response_mask = attention_mask[:, -response_length:] if attention_mask.size(1) >= response_length else attention_mask
+                        # Count non-padding tokens per sample
+                        response_lengths = response_mask.sum(dim=-1).cpu().tolist()
+                    else:
+                        # If no attention mask, use full response length
+                        batch_size = responses.size(0)
+                        response_lengths = [response_length] * batch_size
+                else:
+                    # Fallback for list format
+                    response_lengths = [len(r) for r in responses] if isinstance(responses, (list, tuple)) else [1]
+                
+                avg_response_len = sum(response_lengths) / len(response_lengths) if response_lengths else 0
+                total_tokens = sum(response_lengths)
+            else:
+                avg_response_len = 0
+                total_tokens = 0
             
             text_actions = self.tokenizer.batch_decode(batch.batch['responses'], skip_special_tokens=True)
             
@@ -483,6 +640,10 @@ class TrajectoryCollector:
 
             if 'tool_calling' in infos[0]:
                 tool_callings[active_masks] += np.array([info['tool_calling'] for info in infos], dtype=np.float32)[active_masks]
+                tool_calling_count = int(np.sum([info['tool_calling'] for info in infos]))
+            else:
+                tool_calling_count = 0
+            
             # Create reward tensor, only assign rewards for active environments
             # episode_rewards += torch_to_numpy(rewards) * torch_to_numpy(active_masks)
             episode_rewards[active_masks] += torch_to_numpy(rewards)[active_masks]
@@ -491,6 +652,39 @@ class TrajectoryCollector:
             assert len(rewards) == batch_size, f"env should return rewards for all environments, got {len(rewards)} rewards for {batch_size} environments"
             batch.non_tensor_batch['rewards'] = torch_to_numpy(rewards, is_object=True)
             batch.non_tensor_batch['active_masks'] = torch_to_numpy(active_masks, is_object=True)
+            
+            # Calculate statistics for logging
+            avg_reward = float(np.mean(rewards[active_masks])) if np.any(active_masks) else 0.0
+            done_count = int(np.sum(dones))
+            total_tool_calls = int(np.sum(tool_callings))
+            
+            # Print detailed progress information
+            speed = total_tokens / gen_time if gen_time > 0 else 0
+            print(f"[Rollout] Step {_step + 1}: Generated {len(batch_output.batch)} sequences | "
+                  f"Avg response: {avg_response_len:.1f} tokens | Total: {total_tokens} tokens | "
+                  f"Time: {gen_time:.2f}s | Speed: {speed:.1f} tokens/s | "
+                  f"Reward: avg={avg_reward:.3f} | Done: {done_count}/{batch_size} | "
+                  f"Tool calls: {tool_calling_count} (total: {total_tool_calls})")
+            
+            # Log detailed rollout information to file
+            try:
+                self._log_rollout_step(
+                    step=_step + 1,
+                    batch_output=batch_output,
+                    text_actions=text_actions,
+                    rewards=rewards,
+                    dones=dones,
+                    infos=infos,
+                    tool_callings=tool_callings,
+                    episode_rewards=episode_rewards,
+                    episode_lengths=episode_lengths,
+                    gen_time=gen_time,
+                    avg_response_len=avg_response_len,
+                    total_tokens=total_tokens,
+                    active_masks=active_masks
+                )
+            except Exception as e:
+                print(f"[Rollout] Warning: Failed to log rollout step: {e}")
             
             # Update episode lengths for active environments
             batch_list: list[dict] = to_list_of_dict(batch)
