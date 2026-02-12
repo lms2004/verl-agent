@@ -20,7 +20,8 @@ try:
 
     SUPPORTED_MOE_MODELS.append(DeepseekV2ForCausalLM)
     SUPPORTED_MOE_MODELS.append(DeepseekV3ForCausalLM)
-except ImportError:
+except (ImportError, AssertionError):
+    # 捕获 ImportError 和 AssertionError（PyTorch inductor 重复模板名称错误）
     pass
 
 try:

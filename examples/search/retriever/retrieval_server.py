@@ -202,6 +202,14 @@ class DenseRetriever(BaseRetriever):
         self.index = faiss.read_index(self.index_path)
         if config.faiss_gpu:
             if config.faiss_gpu_id is not None:
+                # Check GPU availability
+                num_gpus = faiss.get_num_gpus()
+                if config.faiss_gpu_id >= num_gpus:
+                    raise RuntimeError(
+                        f"Invalid GPU device {config.faiss_gpu_id}. "
+                        f"Only {num_gpus} GPU(s) available (0-{num_gpus-1}). "
+                        f"Please set FAISS_GPU_ID to a valid GPU ID or unset it to use all GPUs."
+                    )
                 # Use specific GPU
                 res = faiss.StandardGpuResources()
                 self.index = faiss.index_cpu_to_gpu(res, config.faiss_gpu_id, self.index)
