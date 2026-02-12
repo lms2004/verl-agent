@@ -603,6 +603,10 @@ def make_envs(config):
     """
     Create enviroments 
     """ 
+    # Handle null/None env_name for dataset-based training (e.g., GSM8K)
+    if config.env.env_name is None or config.env.env_name == "null" or str(config.env.env_name).lower() == "null":
+        return None, None
+    
     # check if config.env.rollout.n is an integer
     if not isinstance(config.env.rollout.n, int):
         raise ValueError("config.env.rollout.n should be an integer")

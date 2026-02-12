@@ -9,6 +9,10 @@ defaults:
 data:
   return_raw_chat: True  # Required for multi-turn tool calling
 
+# GSM8K training doesn't need environment, disable env loading
+env:
+  env_name: null  # No environment needed for dataset-based training
+
 actor_rollout_ref:
   rollout:
     name: sglang  # Use sglang engine for multi-turn tool calling
