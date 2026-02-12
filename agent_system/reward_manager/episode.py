@@ -16,6 +16,7 @@
 from verl import DataProto
 import torch
 import numpy as np
+from verl.utils.reward_score import gsm8k
 
 class EpisodeRewardManager:
     """The reward manager.
@@ -58,8 +59,6 @@ class EpisodeRewardManager:
             prompt_str = self.tokenizer.decode(valid_prompt_ids, skip_special_tokens=False)
             response_str = self.tokenizer.decode(valid_response_ids, skip_special_tokens=False)
 
-            # ground_truth = data_item.non_tensor_batch['reward_model']['ground_truth']
-
             data_source = data_item.non_tensor_batch['data_source']
 
             extra_info = data_item.non_tensor_batch.get('extra_info', None)
@@ -68,14 +67,34 @@ class EpisodeRewardManager:
                 pixel_values = multi_modal_inputs['pixel_values']
                 image_grid_thw = multi_modal_inputs['image_grid_thw']
 
-
             episode_rewards = data_item.non_tensor_batch['episode_rewards']
             episode_lengths = data_item.non_tensor_batch['episode_lengths']
 
-            if self.normalize_by_length:
-                score = episode_rewards / episode_lengths
+            # For GSM8K and similar datasets, if episode_rewards is 0, compute reward from response text
+            if episode_rewards == 0.0 and 'reward_model' in data_item.non_tensor_batch:
+                reward_model = data_item.non_tensor_batch['reward_model']
+                if isinstance(reward_model, dict) and 'ground_truth' in reward_model:
+                    ground_truth = reward_model['ground_truth']
+                    # Compute reward from response text using GSM8K scoring
+                    score = gsm8k.compute_score(
+                        solution_str=response_str,
+                        ground_truth=ground_truth,
+                        method="flexible",
+                        format_score=0.0,
+                        score=1.0,
+                    )
+                else:
+                    # Fallback to episode_rewards
+                    if self.normalize_by_length:
+                        score = episode_rewards / episode_lengths if episode_lengths > 0 else 0.0
+                    else:
+                        score = episode_rewards
             else:
-                score = episode_rewards
+                # Use episode_rewards as normal
+                if self.normalize_by_length:
+                    score = episode_rewards / episode_lengths if episode_lengths > 0 else 0.0
+                else:
+                    score = episode_rewards
             reward_tensor[i, valid_response_length - 1] = torch.tensor(score, dtype=torch.float32, device=prompt_ids.device)
 
             if data_source not in already_print_data_sources:
