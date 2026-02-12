@@ -288,6 +288,11 @@ class RLHFDataset(Dataset):
             logger.warning("tools_kwargs is empty for index {}, data source: {}", index, row_dict["data_source"])
         row_dict["index"] = index
         row_dict["tools_kwargs"] = tools_kwargs
+        
+        # Ensure env_kwargs is preserved if it exists in the dataset
+        # env_kwargs should be passed through from the parquet file
+        # It's already in row_dict if it exists in the dataframe, so no need to do anything
+        
         return row_dict
 
     def __getstate__(self):

@@ -18,6 +18,7 @@ import numpy as np
 import time
 import os
 import json
+import re
 from datetime import datetime
 from verl import DataProto
 from verl.utils.dataset.rl_dataset import collate_fn
@@ -508,34 +509,144 @@ class TrajectoryCollector:
             infos = [{} for _ in range(batch_size)]
         else:
             # Initial observations from the environment
-            env_kwargs = gen_batch.non_tensor_batch.pop('env_kwargs', None)
-            # If env_kwargs is not available, try to construct it from extra_info
+            # env_kwargs should be in non_tensor_batch if it exists in the dataset
+            # It will be a numpy array of dtype=object containing dicts (one per sample)
+            env_kwargs_raw = gen_batch.non_tensor_batch.pop('env_kwargs', None)
+            
+            # Convert numpy array to list if needed
+            if env_kwargs_raw is not None:
+                if isinstance(env_kwargs_raw, np.ndarray):
+                    env_kwargs = env_kwargs_raw.tolist()
+                elif isinstance(env_kwargs_raw, list):
+                    env_kwargs = env_kwargs_raw
+                else:
+                    # If it's a single dict (shouldn't happen, but handle it)
+                    env_kwargs = [env_kwargs_raw] if isinstance(env_kwargs_raw, dict) else None
+            else:
+                env_kwargs = None
+            
+            extra_info = gen_batch.non_tensor_batch.get('extra_info', [])
+            reward_model = gen_batch.non_tensor_batch.get('reward_model', [])
+            data_source_array = gen_batch.non_tensor_batch.get('data_source', [])
+            raw_prompts = gen_batch.non_tensor_batch.get('raw_prompt', [])
+            
+            # Convert from numpy array to list if needed
+            if isinstance(extra_info, np.ndarray):
+                extra_info = extra_info.tolist()
+            if isinstance(reward_model, np.ndarray):
+                reward_model = reward_model.tolist()
+            if isinstance(data_source_array, np.ndarray):
+                data_source_array = data_source_array.tolist()
+            if isinstance(raw_prompts, np.ndarray):
+                raw_prompts = raw_prompts.tolist()
+            
+            # Helper function to extract question from raw_prompt
+            def extract_question_from_prompt(prompts_list, idx):
+                """Extract question from raw_prompt (list of messages)."""
+                if not prompts_list or idx >= len(prompts_list):
+                    return ''
+                prompt = prompts_list[idx]
+                if isinstance(prompt, list) and len(prompt) > 0:
+                    # Find user message
+                    for msg in prompt:
+                        if isinstance(msg, dict) and msg.get('role') == 'user':
+                            content = msg.get('content', '')
+                            # Remove instruction following text if present
+                            if "Let's think step by step" in content:
+                                question = content.split("Let's think step by step")[0].strip()
+                            elif "Let\'s think step by step" in content:
+                                question = content.split("Let\'s think step by step")[0].strip()
+                            else:
+                                question = content.strip()
+                            return question
+                return ''
+            
+            # If env_kwargs is not available, construct it from extra_info, reward_model, and data_source
             if env_kwargs is None:
-                extra_info = gen_batch.non_tensor_batch.get('extra_info', [])
                 if extra_info and len(extra_info) > 0:
                     env_kwargs = []
-                    for info in extra_info:
+                    for i in range(len(extra_info)):
+                        info = extra_info[i] if i < len(extra_info) else {}
+                        
+                        # Get question from extra_info
+                        question = ''
                         if isinstance(info, dict):
-                            # Try to get ground_truth from reward_model or answer
-                            ground_truth = info.get('reward_model', {}).get('ground_truth', '') if isinstance(info.get('reward_model'), dict) else info.get('answer', '')
-                            env_kwargs.append({
-                                'question': info.get('question', ''),
-                                'ground_truth': ground_truth,
-                                'data_source': info.get('data_source', 'unknown'),
-                            })
+                            question = info.get('question', '')
+                        
+                        # If question is empty, try to extract from raw_prompt
+                        if not question.strip() and i < len(raw_prompts):
+                            question = extract_question_from_prompt(raw_prompts, i)
+                        
+                        # Get ground_truth from reward_model (top-level field, not in extra_info)
+                        ground_truth = ''
+                        if i < len(reward_model):
+                            rm = reward_model[i]
+                            if isinstance(rm, dict):
+                                ground_truth = rm.get('ground_truth', '')
+                        
+                        # Get data_source from top-level field
+                        data_source = 'unknown'
+                        if i < len(data_source_array):
+                            data_source = str(data_source_array[i]) if data_source_array[i] is not None else 'unknown'
+                        
+                        env_kwargs.append({
+                            'question': question,
+                            'ground_truth': ground_truth,
+                            'data_source': data_source,
+                        })
+                    
                     if len(env_kwargs) == 0:
                         env_kwargs = None
+                    else:
+                        # Log warning if any questions are empty
+                        empty_count = sum(1 for kw in env_kwargs if not kw.get('question', '').strip())
+                        if empty_count > 0:
+                            print(f"[Rollout] Warning: {empty_count}/{len(env_kwargs)} samples have empty questions after extraction from extra_info")
             
             # Ensure env_kwargs matches batch_size to avoid empty observations
             if env_kwargs is None or len(env_kwargs) == 0:
-                # Create dummy kwargs for each item in the batch
-                env_kwargs = [{
-                    'question': '',
-                    'ground_truth': '',
-                    'data_source': 'unknown',
-                } for _ in range(batch_size)]
+                # Try one more time to extract from raw_prompt if available
+                if raw_prompts and len(raw_prompts) > 0:
+                    print(f"[Rollout] Warning: env_kwargs is None/empty, attempting to extract questions from raw_prompt")
+                    env_kwargs = []
+                    for i in range(min(len(raw_prompts), batch_size)):
+                        question = extract_question_from_prompt(raw_prompts, i)
+                        
+                        # Try to get ground_truth from reward_model and data_source from top-level fields
+                        ground_truth = ''
+                        data_source = 'unknown'
+                        if i < len(reward_model):
+                            rm = reward_model[i]
+                            if isinstance(rm, dict):
+                                ground_truth = rm.get('ground_truth', '')
+                        if i < len(data_source_array):
+                            data_source = str(data_source_array[i]) if data_source_array[i] is not None else 'unknown'
+                        
+                        env_kwargs.append({
+                            'question': question,
+                            'ground_truth': ground_truth,
+                            'data_source': data_source,
+                        })
+                    
+                    # Pad to batch_size if needed
+                    while len(env_kwargs) < batch_size:
+                        env_kwargs.append({
+                            'question': '',
+                            'ground_truth': '',
+                            'data_source': 'unknown',
+                        })
+                
+                # If still None/empty, create dummy kwargs
+                if env_kwargs is None or len(env_kwargs) == 0:
+                    print(f"[Rollout] Error: Could not extract questions from dataset. Creating dummy kwargs with empty questions.")
+                    env_kwargs = [{
+                        'question': '',
+                        'ground_truth': '',
+                        'data_source': 'unknown',
+                    } for _ in range(batch_size)]
             elif len(env_kwargs) < batch_size:
                 # Pad with dummy kwargs if env_kwargs is shorter than batch_size
+                print(f"[Rollout] Warning: env_kwargs length ({len(env_kwargs)}) < batch_size ({batch_size}), padding with dummy kwargs")
                 dummy_kw = {
                     'question': '',
                     'ground_truth': '',
@@ -544,7 +655,13 @@ class TrajectoryCollector:
                 env_kwargs = list(env_kwargs) + [dummy_kw] * (batch_size - len(env_kwargs))
             elif len(env_kwargs) > batch_size:
                 # Truncate if env_kwargs is longer than batch_size
+                print(f"[Rollout] Warning: env_kwargs length ({len(env_kwargs)}) > batch_size ({batch_size}), truncating")
                 env_kwargs = env_kwargs[:batch_size]
+            
+            # Final check: log if any questions are still empty
+            empty_questions = [i for i, kw in enumerate(env_kwargs) if not kw.get('question', '').strip()]
+            if empty_questions:
+                print(f"[Rollout] Error: {len(empty_questions)} samples still have empty questions after extraction: {empty_questions[:10]}")
             
             obs, infos = envs.reset(kwargs=env_kwargs)
 
