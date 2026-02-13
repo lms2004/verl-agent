@@ -44,9 +44,10 @@ __all__ = ["DataParallelPPOActor"]
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
-# flash_attn is not used when using SDPA attention
-# Set to None since we're using SDPA instead of flash attention
-index_first_axis = pad_input = rearrange = unpad_input = None
+if is_cuda_available:
+    from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
+elif is_npu_available:
+    from transformers.integrations.npu_flash_attention import index_first_axis, pad_input, rearrange, unpad_input
 
 
 class DataParallelPPOActor(BasePPOActor):
@@ -58,14 +59,7 @@ class DataParallelPPOActor(BasePPOActor):
 
         self.use_remove_padding = self.config.get("use_remove_padding", False)
         print(f"Actor use_remove_padding={self.use_remove_padding}")
-        # Check if flash_attn functions are available when use_remove_padding is enabled
-        if self.use_remove_padding:
-            if index_first_axis is None or pad_input is None or rearrange is None or unpad_input is None:
-                raise ImportError(
-                    "use_remove_padding=True requires flash_attn. "
-                    "Please install flash-attn: pip install flash-attn "
-                    "or set use_remove_padding=False"
-                )
+
         self.use_fused_kernels = self.config.get("use_fused_kernels", False)
         print(f"Actor use_fused_kernels={self.use_fused_kernels}")
 
