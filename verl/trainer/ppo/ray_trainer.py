@@ -686,7 +686,7 @@ class RayPPOTrainer:
         # Log to each configured logger
         self.validation_generations_logger.log(self.config.trainer.logger, samples, self.global_steps)
 
-    def _validate(self):
+    def _validate(self, logger=None):
         reward_tensor_lst = []
         data_source_lst = []
         tool_calling_list = []
@@ -697,6 +697,20 @@ class RayPPOTrainer:
         sample_inputs = []
         sample_outputs = []
         sample_scores = []
+
+        # Calculate total number of batches for progress tracking
+        total_batches = len(self.val_dataloader)
+        total_samples = len(self.val_dataset)
+        processed_samples = 0
+        batch_idx = 0
+
+        # Create progress bar
+        progress_bar = tqdm(
+            total=total_batches,
+            desc="Validation Progress",
+            unit="batch",
+            disable=False
+        )
 
         for test_data in self.val_dataloader:
             test_batch = DataProto.from_single_dict(test_data)
@@ -782,6 +796,40 @@ class RayPPOTrainer:
                     for i in range(1, len(test_batch.non_tensor_batch[k])):
                         assert test_batch.non_tensor_batch[k][0] == test_batch.non_tensor_batch[k][i], f'not all success_rate are the same, 0: {test_batch.non_tensor_batch[k][0]}, {i}: {test_batch.non_tensor_batch[k][i]}'
 
+            # Update progress tracking
+            batch_size = reward_tensor.shape[0]
+            processed_samples += batch_size
+            batch_idx += 1
+            
+            # Update progress bar
+            progress_bar.update(1)
+            progress_bar.set_postfix({
+                'samples': f'{processed_samples}/{total_samples}',
+                'progress': f'{100.0 * processed_samples / total_samples:.1f}%'
+            })
+            
+            # Log progress to wandb every 10 batches or at the end
+            if logger is not None and (batch_idx % 10 == 0 or batch_idx == total_batches):
+                # Calculate current average reward for progress tracking
+                if reward_tensor_lst:
+                    current_rewards = torch.cat(reward_tensor_lst, dim=0).sum(-1).cpu()
+                    avg_reward = float(current_rewards.mean().item())
+                else:
+                    avg_reward = 0.0
+                
+                logger.log(
+                    data={
+                        'val/progress/samples_processed': processed_samples,
+                        'val/progress/total_samples': total_samples,
+                        'val/progress/percentage': 100.0 * processed_samples / total_samples,
+                        'val/progress/batch_idx': batch_idx,
+                        'val/progress/total_batches': total_batches,
+                        'val/progress/current_avg_reward': avg_reward,
+                    },
+                    step=self.global_steps
+                )
+
+        progress_bar.close()
         self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
 
         reward_tensor = torch.cat(reward_tensor_lst, dim=0).sum(-1).cpu()  # (batch_size,)
@@ -1030,7 +1078,7 @@ class RayPPOTrainer:
         # perform validation before training
         # currently, we only support validation using the reward_function.
         if self.val_reward_fn is not None and self.config.trainer.get("val_before_train", True):
-            val_metrics = self._validate()
+            val_metrics = self._validate(logger=logger)
             assert val_metrics, f"{val_metrics=}"
             pprint(f"Initial validation metrics: {val_metrics}")
             logger.log(data=val_metrics, step=self.global_steps)
@@ -1287,7 +1335,7 @@ class RayPPOTrainer:
                     # validate
                     if self.val_reward_fn is not None and self.config.trainer.test_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.test_freq == 0):
                         with _timer("testing", timing_raw):
-                            val_metrics: dict = self._validate()
+                            val_metrics: dict = self._validate(logger=logger)
                             if is_last_step:
                                 last_val_metrics = val_metrics
                         metrics.update(val_metrics)
