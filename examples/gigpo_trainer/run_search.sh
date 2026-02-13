@@ -98,4 +98,6 @@ python3 -m verl.trainer.main_ppo \
     trainer.save_freq=50 \
     trainer.test_freq=50 \
     trainer.total_epochs=1 \
-    trainer.val_before_train=False $@
+    trainer.val_before_train=False \
+    trainer.log_val_generations=10 \
+    trainer.val_only=False $@
