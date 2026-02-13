@@ -43,7 +43,7 @@ def _fsdp_activation_offloading_test(rank, world_size, rendezvous_file, strategy
     config = Qwen2Config(num_hidden_layers=4)
 
     with torch.device("cuda"):
-        model = AutoModelForCausalLM.from_config(config=config, torch_dtype=torch.bfloat16, attn_implementation="sdpa")
+        model = AutoModelForCausalLM.from_config(config=config, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2")
         model = model.to(device="cuda")
 
     # Wrap model with FSDP
