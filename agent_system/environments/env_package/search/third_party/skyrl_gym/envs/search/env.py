@@ -1,7 +1,13 @@
 from agent_system.environments.env_package.search.third_party.skyrl_gym.envs.base_text_env import BaseTextEnv, BaseTextEnvStepOutput, ConversationType
 from typing import Any
 from agent_system.environments.env_package.search.third_party.skyrl_gym.envs.search.utils import compute_score
+from agent_system.environments.env_package.search.third_party.skyrl_gym.envs.search.information_gain_reward import (
+    compute_information_gain_reward,
+    fetch_embeddings_from_api,
+    gold_docs_to_texts,
+)
 from agent_system.environments.env_package.search.third_party.skyrl_gym.tools import SearchToolGroup
+import json
 import re
 from typing import Dict, Optional, List
 from omegaconf import DictConfig
@@ -25,6 +31,9 @@ class SearchEnv(BaseTextEnv):
             log_requests=env_config.log_requests,
         )
         self.init_tool_groups([self.tool_group])
+        self._use_information_gain_reward = getattr(env_config, "use_information_gain_reward", False)
+        self._redundancy_penalty_lambda = float(getattr(env_config, "redundancy_penalty_lambda", 0.0))
+        self._embed_url = (getattr(env_config, "embed_url", None) or "").strip() or None
         
     def reset(self, extras: Dict[str, Any] = {}) -> None:
         assert "ground_truth" in extras, "ground_truth is required in extras field"
@@ -32,6 +41,7 @@ class SearchEnv(BaseTextEnv):
         self.max_turns = extras["max_turns"] if "max_turns" in extras else 3
 
         self.data_source = extras.get("data_source", "unknown")
+        support_docs = extras.get("support_docs") or []
 
         # Chat history
         # role (user, assistant), content (tool observation or LLM response)
@@ -39,12 +49,46 @@ class SearchEnv(BaseTextEnv):
         self.done = False
         self.turns = 0
 
+        # Information gain + redundancy state (E5 embeddings via embed_url)
+        self._support_docs = support_docs if isinstance(support_docs, list) else []
+        self._memory: List[float] = []
+        self._history_ids: set = set()
+        self._gold_embeddings = None  # (n, dim) from E5 /embed
+
+        if self._use_information_gain_reward and self._support_docs and self._embed_url:
+            gold_texts = gold_docs_to_texts(self._support_docs)
+            self._gold_embeddings = fetch_embeddings_from_api(
+                self._embed_url, gold_texts, is_passage=True
+            )
+            n = self._gold_embeddings.shape[0]
+            self._memory = [0.0] * n
+            self._history_ids = set()
+
 
     def _parse_action(self, action: str) -> List[Optional[str]]:
         match = None
         if "<search>" in action and "</search>" in action:
             match = re.search(r"<search>(.*?)</search>", action, re.DOTALL)
         return [match.group(1)] if match else [None]
+
+    def _parse_retrieved_docs(self, observation: str) -> List[str]:
+        """Extract list of retrieved doc text strings from search tool observation."""
+        if not observation or "<information>" not in observation or "</information>" not in observation:
+            return []
+        start = observation.find("<information>") + len("<information>")
+        end = observation.find("</information>")
+        raw = observation[start:end].strip()
+        try:
+            data = json.loads(raw)
+            result = data.get("result", "")
+        except (json.JSONDecodeError, TypeError):
+            result = raw
+        if not isinstance(result, str):
+            return []
+        # Split by "Doc N:" pattern; result format is "Doc 1: content\nDoc 2: content\n" or "\n---\n" between queries
+        parts = re.split(r"\n?Doc\s+\d+:\s*", result, flags=re.IGNORECASE)
+        docs = [p.strip() for p in parts if p.strip()]
+        return docs
 
     def _get_reward(self, action: str, done: bool) -> float:
         if done:
@@ -91,7 +135,15 @@ class SearchEnv(BaseTextEnv):
 
         if done:
             return BaseTextEnvStepOutput(
-                observations=[], reward=reward, done=done, metadata={"data_source": self.data_source, "tool_calling": False}, postprocessed_action=action
+                observations=[],
+                reward=reward,
+                done=done,
+                metadata={
+                    "data_source": self.data_source,
+                    "tool_calling": False,
+                    "terminal_reward": reward,
+                },
+                postprocessed_action=action,
             )
 
         try:
@@ -100,6 +152,34 @@ class SearchEnv(BaseTextEnv):
         except Exception as e:
             error = str(e)
             observation = None
+
+        info = {
+            "tool_calling": True,
+            "tool_group": "SearchToolGroup",
+            "tool_name": "search",
+            "tool_input": query,
+            "data_source": self.data_source,
+        }
+
+        # Step reward: information gain + redundancy (E5 embeddings)
+        if observation and self._use_information_gain_reward and self._gold_embeddings is not None and self._gold_embeddings.shape[0] > 0 and self._embed_url:
+            retrieved_docs = self._parse_retrieved_docs(observation)
+            if retrieved_docs:
+                retrieved_emb = fetch_embeddings_from_api(
+                    self._embed_url, retrieved_docs, is_passage=True
+                )
+                if retrieved_emb.shape[0] > 0:
+                    reward, self._memory, self._history_ids, delta_t, p_t = compute_information_gain_reward(
+                        self._gold_embeddings,
+                        retrieved_emb,
+                        retrieved_docs,
+                        self._memory,
+                        self._history_ids,
+                        lambda_=self._redundancy_penalty_lambda,
+                    )
+                    info["information_gain"] = delta_t
+                    info["redundancy_penalty"] = p_t
+                    info["step_reward"] = reward  # R^t = Δ^t - λ*p^t
 
         # Wrap the observation properly as a message
         if observation:
@@ -110,14 +190,6 @@ class SearchEnv(BaseTextEnv):
             new_obs = {"role": "user", "content": error}
         else:
             new_obs = None
-
-        info = {
-            "tool_calling": True,
-            "tool_group": "SearchToolGroup",
-            "tool_name": "search",
-            "tool_input": query,
-            "data_source": self.data_source,
-        }
 
         # Update chat history
         if new_obs:

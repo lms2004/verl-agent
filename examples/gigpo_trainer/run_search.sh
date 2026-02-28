@@ -39,8 +39,8 @@ similarity_thresh=0.9
 
 MODEL_PATH="./models/Qwen/Qwen2.5-3B-Instruct"
 
-TRAIN_DATA="./data/searchR1_processed_direct/train.parquet"
-VAL_DATA="./data/searchR1_processed_direct/test.parquet"
+TRAIN_DATA="./data/stepsearch_support_docs_processed/train.parquet"
+VAL_DATA="./data/stepsearch_support_docs_processed/test.parquet"
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=gigpo \
@@ -89,6 +89,9 @@ python3 -m verl.trainer.main_ppo \
     env.rollout.n=$group_size \
     env.history_length=4 \
     env.search.search_url='http://127.0.0.1:8000/retrieve' \
+    env.search.embed_url='http://127.0.0.1:8000/embed' \
+    env.search.use_information_gain_reward=True \
+    env.search.redundancy_penalty_lambda=0.5 \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_search' \

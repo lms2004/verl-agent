@@ -9,6 +9,8 @@
 **/playground
 **/wandb
 models/
+StepSearch/
+OpenResearch/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

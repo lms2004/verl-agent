@@ -132,7 +132,14 @@ def call_search_api(
 def _passages2string(retrieval_result):
     format_reference = ""
     for idx, doc_item in enumerate(retrieval_result):
-        content = doc_item["document"]["contents"].strip()
+        doc = doc_item.get("document", doc_item)
+        # Support both legacy "contents" and API "content" + "title"
+        raw = doc.get("contents") if doc.get("contents") is not None else None
+        if raw is None:
+            title = str(doc.get("title", "")).strip()
+            content = str(doc.get("content", "")).strip()
+            raw = f'"{title}"\n{content}' if title else content
+        content = raw.strip()
         format_reference += f"Doc {idx+1}: {content}\n"
     return format_reference
 

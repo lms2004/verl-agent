@@ -76,7 +76,8 @@ class SearchMultiProcessEnv(gym.Env):
         extras = {
             "ground_truth": kwargs["ground_truth"],
             "max_turns": self.max_steps,
-            "data_source": kwargs.get("data_source", "unknown")
+            "data_source": kwargs.get("data_source", "unknown"),
+            "support_docs": kwargs.get("support_docs", []),
         }
         env.reset(extras)
         obs = kwargs["question"]
@@ -105,6 +106,7 @@ class SearchMultiProcessEnv(gym.Env):
                     "ground_truth": "",
                     "question": "",
                     "data_source": "unkown",
+                    "support_docs": [],
                 }
 
         padded_kwargs = list(kwargs) + [dummy_kw] * pad_n

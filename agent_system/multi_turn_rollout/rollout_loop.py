@@ -794,6 +794,26 @@ class TrajectoryCollector:
             assert len(rewards) == batch_size, f"env should return rewards for all environments, got {len(rewards)} rewards for {batch_size} environments"
             batch.non_tensor_batch['rewards'] = torch_to_numpy(rewards, is_object=True)
             batch.non_tensor_batch['active_masks'] = torch_to_numpy(active_masks, is_object=True)
+            # Pass through reward components from env for separate wandb logging
+            if infos and isinstance(infos[0], dict):
+                batch.non_tensor_batch['step_information_gain'] = np.array(
+                    [float(infos[i].get('information_gain', 0.0)) for i in range(len(infos))],
+                    dtype=np.float32,
+                )
+                batch.non_tensor_batch['step_redundancy_penalty'] = np.array(
+                    [float(infos[i].get('redundancy_penalty', 0.0)) for i in range(len(infos))],
+                    dtype=np.float32,
+                )
+                # Combined step reward R^t = Δ^t - λ*p^t (only set on search steps with retrieval)
+                batch.non_tensor_batch['step_reward'] = np.array(
+                    [float(infos[i].get('step_reward', 0.0)) for i in range(len(infos))],
+                    dtype=np.float32,
+                )
+                # Task score when episode ends (done step)
+                batch.non_tensor_batch['terminal_reward'] = np.array(
+                    [float(infos[i].get('terminal_reward', np.nan)) for i in range(len(infos))],
+                    dtype=np.float32,
+                )
             
             # Calculate statistics for logging
             avg_reward = float(np.mean(rewards[active_masks])) if np.any(active_masks) else 0.0

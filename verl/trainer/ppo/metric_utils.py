@@ -127,11 +127,11 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> Dict[str,
         return_var = torch.var(valid_returns)
 
     metrics = {
-        # score
+        # --- Raw score (from reward fn, before KL / invalid-action penalty) ---
         "critic/score/mean": torch.mean(sequence_score).detach().item(),
         "critic/score/max": torch.max(sequence_score).detach().item(),
         "critic/score/min": torch.min(sequence_score).detach().item(),
-        # reward
+        # --- Training reward (after KL penalty, invalid-action penalty; used for advantage) ---
         "critic/rewards/mean": torch.mean(sequence_reward).detach().item(),
         "critic/rewards/max": torch.max(sequence_reward).detach().item(),
         "critic/rewards/min": torch.min(sequence_reward).detach().item(),
@@ -186,6 +186,37 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> Dict[str,
         #     batch.non_tensor_batch["tool_callings"][unique_idx].min().item(),
         **({f"episode/{k}": v[0].item() for k, v in batch.non_tensor_batch.items() if "success_rate" in k}),
     }
+
+    # --- Search env: step-level and terminal rewards (separate series in wandb) ---
+    if "step_information_gain" in batch.non_tensor_batch:
+        ig = batch.non_tensor_batch["step_information_gain"]
+        ig_valid = ig[np.isfinite(ig)]
+        if len(ig_valid) > 0:
+            metrics["reward/search_information_gain/mean"] = float(np.mean(ig_valid))
+            metrics["reward/search_information_gain/max"] = float(np.max(ig_valid))
+            metrics["reward/search_information_gain/min"] = float(np.min(ig_valid))
+    if "step_redundancy_penalty" in batch.non_tensor_batch:
+        rp = batch.non_tensor_batch["step_redundancy_penalty"]
+        rp_valid = rp[np.isfinite(rp)]
+        if len(rp_valid) > 0:
+            metrics["reward/search_redundancy_penalty/mean"] = float(np.mean(rp_valid))
+            metrics["reward/search_redundancy_penalty/max"] = float(np.max(rp_valid))
+            metrics["reward/search_redundancy_penalty/min"] = float(np.min(rp_valid))
+    if "step_reward" in batch.non_tensor_batch:
+        sr = batch.non_tensor_batch["step_reward"]
+        sr_valid = sr[np.isfinite(sr)]
+        if len(sr_valid) > 0:
+            metrics["reward/search_step_reward/mean"] = float(np.mean(sr_valid))
+            metrics["reward/search_step_reward/max"] = float(np.max(sr_valid))
+            metrics["reward/search_step_reward/min"] = float(np.min(sr_valid))
+    if "terminal_reward" in batch.non_tensor_batch:
+        tr = batch.non_tensor_batch["terminal_reward"]
+        tr_valid = tr[np.isfinite(tr)]
+        if len(tr_valid) > 0:
+            metrics["reward/search_terminal_reward/mean"] = float(np.mean(tr_valid))
+            metrics["reward/search_terminal_reward/max"] = float(np.max(tr_valid))
+            metrics["reward/search_terminal_reward/min"] = float(np.min(tr_valid))
+
     return metrics
 
 
