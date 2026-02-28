@@ -212,19 +212,8 @@ class _TensorboardAdapter:
 
 
 class _WandbLoggingAdapter:
-    # Key for step reward by turn (dict turn_id -> value). Logged as scalars reward/step_reward_by_turn/turn_* so curves are selectable in wandb.
-    _STEP_REWARD_BY_TURN_KEY = "reward/step_reward_by_turn_dict"
-
     def log(self, data, step):
         import wandb
-
-        at_turn_vals = data.get(self._STEP_REWARD_BY_TURN_KEY)
-        if isinstance(at_turn_vals, dict) and at_turn_vals:
-            at_turn_vals = {int(k): float(v) for k, v in at_turn_vals.items()}
-            # Log each turn as a scalar so wandb shows selectable curves (no Custom Chart / no table)
-            to_log = {f"reward/step_reward_by_turn/turn_{t}": v for t, v in sorted(at_turn_vals.items())}
-            wandb.log(to_log, step=step)
-            data.pop(self._STEP_REWARD_BY_TURN_KEY, None)  # avoid logging raw dict to any backend
 
         wandb.log(data, step=step)
 

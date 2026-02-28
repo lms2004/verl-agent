@@ -767,6 +767,19 @@ class TrajectoryCollector:
                 infos = [{'is_action_valid': True, 'tool_calling': 0} for _ in range(batch_size)]
             else:
                 next_obs, rewards, dones, infos = envs.step(text_actions)
+                # 确保用于训练的 reward 使用 env 的 step_reward（信息增益+冗余惩罚）或 terminal_reward
+                rewards = np.asarray(rewards, dtype=np.float32) if not isinstance(rewards, np.ndarray) else rewards.astype(np.float32)
+                for i in range(len(infos)):
+                    if not isinstance(infos[i], dict):
+                        continue
+                    if "terminal_reward" in infos[i]:
+                        tr = infos[i]["terminal_reward"]
+                        if tr is not None and (not isinstance(tr, (float, np.floating)) or not np.isnan(tr)):
+                            rewards[i] = float(tr)
+                    elif "step_reward" in infos[i]:
+                        sr = infos[i]["step_reward"]
+                        if sr is not None:
+                            rewards[i] = float(sr)
 
             
             if len(rewards.shape) == 2:

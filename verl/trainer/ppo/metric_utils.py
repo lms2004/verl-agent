@@ -211,7 +211,7 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> Dict[str,
             metrics["reward/search_terminal_reward/max"] = float(np.max(tr_valid))
             metrics["reward/search_terminal_reward/min"] = float(np.min(tr_valid))
 
-    # 2) 总奖励：步奖励 R^t（轮次分解仅用于 wandb 合并图 reward/step_reward_by_turn，不单独上报 at_turn_*）
+    # 2) 总奖励：步奖励 R^t（mean/max/min 与 per_trajectory_mean，不再按 turn 上报）
     if "step_reward" in batch.non_tensor_batch:
         sr = batch.non_tensor_batch["step_reward"].astype(np.float64)
         if np.any(np.isfinite(sr)):
@@ -225,18 +225,6 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> Dict[str,
                     per_traj_sr.append(np.mean(vals))
             if per_traj_sr:
                 metrics["reward/search_step_reward/per_trajectory_mean"] = float(np.mean(per_traj_sr))
-            step_index = np.zeros(len(traj_uid), dtype=np.int64)
-            for uid in np.unique(traj_uid):
-                mask = traj_uid == uid
-                step_index[mask] = np.arange(mask.sum())
-            # 仅提供 dict 供 wandb 合并图使用，不写入 at_turn_0..at_turn_20 单独指标
-            by_turn = {}
-            for t in np.unique(step_index):
-                mt = (step_index == t) & np.isfinite(sr)
-                if mt.sum() > 0:
-                    by_turn[int(t)] = float(np.mean(sr[mt]))
-            if by_turn:
-                metrics["reward/step_reward_by_turn_dict"] = by_turn
 
     # 3) 子奖励：信息增益 Δ^t
     if "step_information_gain" in batch.non_tensor_batch:

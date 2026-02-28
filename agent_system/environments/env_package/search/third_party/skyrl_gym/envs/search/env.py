@@ -35,10 +35,6 @@ class SearchEnv(BaseTextEnv):
         self._redundancy_penalty_lambda = float(getattr(env_config, "redundancy_penalty_lambda", 0.0))
         self._embed_url = (getattr(env_config, "embed_url", None) or "").strip() or None
         
-        # Reward weights: terminal (final outcome) should dominate; step reward is fine-grained shaping.
-        self._terminal_reward_scale = float(getattr(env_config, "terminal_reward_scale", 1.0))
-        self._step_reward_scale = float(getattr(env_config, "step_reward_scale", 1.0))
-        
     def reset(self, extras: Dict[str, Any] = {}) -> None:
         assert "ground_truth" in extras, "ground_truth is required in extras field"
         self.ground_truth = extras["ground_truth"]
@@ -138,16 +134,14 @@ class SearchEnv(BaseTextEnv):
         reward = self._get_reward(action, done)
 
         if done:
-            # Scale terminal reward so "final result correct" dominates over step-level rewards
-            scaled_reward = reward * self._terminal_reward_scale
             return BaseTextEnvStepOutput(
                 observations=[],
-                reward=scaled_reward,
+                reward=reward,
                 done=done,
                 metadata={
                     "data_source": self.data_source,
                     "tool_calling": False,
-                    "terminal_reward": scaled_reward,
+                    "terminal_reward": reward,
                 },
                 postprocessed_action=action,
             )
@@ -175,7 +169,7 @@ class SearchEnv(BaseTextEnv):
                     self._embed_url, retrieved_docs, is_passage=True
                 )
                 if retrieved_emb.shape[0] > 0:
-                    reward, self._memory, self._history_ids, delta_t, p_t = compute_information_gain_reward(
+                    step_r, self._memory, self._history_ids, delta_t, p_t = compute_information_gain_reward(
                         self._gold_embeddings,
                         retrieved_emb,
                         retrieved_docs,
@@ -185,8 +179,8 @@ class SearchEnv(BaseTextEnv):
                     )
                     info["information_gain"] = delta_t
                     info["redundancy_penalty"] = p_t
-                    # Scale step reward (fine-grained shaping); terminal reward scale is applied when done
-                    info["step_reward"] = reward * self._step_reward_scale  # R^t = (Δ^t - λ*p^t) * scale
+                    info["step_reward"] = step_r  # R^t = Δ^t - λ*p^t
+                    reward = step_r  # 用于训练的 step 奖励：信息增益 + 冗余惩罚
 
         # Wrap the observation properly as a message
         if observation:

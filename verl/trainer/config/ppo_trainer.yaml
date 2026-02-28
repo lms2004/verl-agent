@@ -307,8 +307,6 @@ env:
     embed_url: null  # e.g. "http://127.0.0.1:8000/embed" for information-gain reward; null to disable
     use_information_gain_reward: False
     redundancy_penalty_lambda: 0.0
-    terminal_reward_scale: 1.0   # scale for final outcome (correct answer); increase so outcome dominates step reward
-    step_reward_scale: 1.0       # scale for step-level information gain; decrease to make it fine-grained shaping only
     topk: 3
     timeout: 60
   sokoban:
