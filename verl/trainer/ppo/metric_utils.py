@@ -244,8 +244,15 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> Dict[str,
                     per_traj_sr.append(np.mean(vals))
             if per_traj_sr:
                 metrics["reward/search_step_reward/per_trajectory_mean"] = float(np.mean(per_traj_sr))
-
-    if "terminal_reward" in batch.non_tensor_batch:
+            # 轮次奖励：按步数 at_turn_0, at_turn_1, ... 记录，便于看步骤级奖励随轮次的变化
+            step_index = np.zeros(len(traj_uid), dtype=np.int64)
+            for uid in np.unique(traj_uid):
+                mask = traj_uid == uid
+                step_index[mask] = np.arange(mask.sum())
+            for t in np.unique(step_index):
+                mt = (step_index == t) & np.isfinite(sr)
+                if mt.sum() > 0:
+                    metrics[f"reward/search_step_reward/at_turn_{int(t)}"] = float(np.mean(sr[mt]))
         tr = batch.non_tensor_batch["terminal_reward"].astype(np.float64)
         tr_valid = tr[np.isfinite(tr)]
         if len(tr_valid) > 0:
