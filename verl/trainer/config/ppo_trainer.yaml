@@ -304,6 +304,9 @@ env:
   search:
     log_requests: false
     search_url: "http://127.0.0.1:8000/retrieve" # also support multiple urls: ["http://127.0.0.1:8000/retrieve", "http://127.0.0.1:8001/retrieve"]
+    embed_url: null  # e.g. "http://127.0.0.1:8000/embed" for information-gain reward; null to disable
+    use_information_gain_reward: False
+    redundancy_penalty_lambda: 0.0
     topk: 3
     timeout: 60
   sokoban:
