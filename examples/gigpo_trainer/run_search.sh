@@ -46,6 +46,8 @@ ppo_micro_batch_size_per_gpu=${PPO_MICRO_BATCH_SIZE_PER_GPU:-4}
 rollout_log_prob_micro_batch_per_gpu=${ROLLOUT_LOG_PROB_MICRO_BATCH_PER_GPU:-16}
 ref_log_prob_micro_batch_per_gpu=${REF_LOG_PROB_MICRO_BATCH_PER_GPU:-16}
 gpu_memory_utilization=${GPU_MEMORY_UTILIZATION:-0.5}
+# chunked prefill 要求 max_num_batched_tokens >= max_model_len (prompt + response)
+max_num_batched_tokens=${MAX_NUM_BATCHED_TOKENS:-$((max_prompt_length + max_response_length))}
 
 # GiGPO
 mode=${GIGPO_MODE:-"mean_std_norm"}
@@ -85,7 +87,7 @@ trainer_nnodes=${TRAINER_NNODES:-1}
 # 环境变量一览（覆盖示例）:
 # 数据: TRAIN_DATA_SIZE, VAL_DATA_SIZE, TRAIN_DATA, VAL_DATA
 # 长度: MAX_PROMPT_LENGTH, MAX_RESPONSE_LENGTH
-# PPO/显存: PPO_MINI_BATCH_SIZE, PPO_MICRO_BATCH_SIZE_PER_GPU, ROLLOUT_LOG_PROB_MICRO_BATCH_PER_GPU, REF_LOG_PROB_MICRO_BATCH_PER_GPU, GPU_MEMORY_UTILIZATION
+# PPO/显存: PPO_MINI_BATCH_SIZE, PPO_MICRO_BATCH_SIZE_PER_GPU, ROLLOUT_LOG_PROB_MICRO_BATCH_PER_GPU, REF_LOG_PROB_MICRO_BATCH_PER_GPU, GPU_MEMORY_UTILIZATION, MAX_NUM_BATCHED_TOKENS
 # GiGPO: GIGPO_MODE, GIGPO_ENABLE_SIMILARITY, GIGPO_SIMILARITY_THRESH
 # 环境: ENV_MAX_STEPS, ENV_HISTORY_LENGTH, GROUP_SIZE, ENV_SEARCH_URL, ENV_EMBED_URL, ENV_USE_INFORMATION_GAIN_REWARD, ENV_REDUNDANCY_PENALTY_LAMBDA
 # 模型/训练: MODEL_PATH, EXPERIMENT_NAME, ACTOR_LR, ACTOR_LR_WARMUP_RATIO, INVALID_ACTION_PENALTY_COEF, ALGORITHM_GAMMA, PARAM_OFFLOAD, OPTIMIZER_OFFLOAD
@@ -119,6 +121,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=$ENGINE \
     actor_rollout_ref.rollout.gpu_memory_utilization=$gpu_memory_utilization \
+    actor_rollout_ref.rollout.max_num_batched_tokens=$max_num_batched_tokens \
     actor_rollout_ref.rollout.enable_chunked_prefill=True \
     actor_rollout_ref.rollout.enforce_eager=False \
     actor_rollout_ref.rollout.free_cache_engine=False \
