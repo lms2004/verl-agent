@@ -212,11 +212,56 @@ class _TensorboardAdapter:
 
 
 class _WandbLoggingAdapter:
+    # Key for step reward by turn (dict turn_id -> value); used only for combined multi-line chart, not logged as scalar.
+    _STEP_REWARD_BY_TURN_KEY = "reward/step_reward_by_turn_dict"
+    _MAX_AT_TURN_HISTORY = 500  # cap steps to avoid unbounded memory
+
+    def __init__(self):
+        self._at_turn_history: List[tuple] = []  # [(step, {turn_id: value}), ...]
+
     def log(self, data, step):
         import wandb
 
+        # Use single dict key for combined chart (no more at_turn_0..at_turn_20 in data)
+        at_turn_vals = data.get(self._STEP_REWARD_BY_TURN_KEY)
+        if isinstance(at_turn_vals, dict) and at_turn_vals:
+            at_turn_vals = {int(k): float(v) for k, v in at_turn_vals.items()}
+            self._at_turn_history.append((step, at_turn_vals))
+            if len(self._at_turn_history) > self._MAX_AT_TURN_HISTORY:
+                self._at_turn_history.pop(0)
+            self._log_at_turn_combined(step)
+            data.pop(self._STEP_REWARD_BY_TURN_KEY, None)  # avoid logging raw dict to any backend
+
         wandb.log(data, step=step)
-    
+
+    def _log_at_turn_combined(self, step):
+        """Log one chart with multiple curves: x=step, y=reward, one curve per turn."""
+        import wandb
+
+        if len(self._at_turn_history) < 1:
+            return
+        steps = [h[0] for h in self._at_turn_history]
+        all_turns = sorted(set(t for _, d in self._at_turn_history for t in d))
+        if not all_turns:
+            return
+        # Build ys: list of lists, each inner list is one series (one turn over steps)
+        ys = []
+        keys = []
+        for t in all_turns:
+            keys.append(f"turn_{t}")
+            series = []
+            for _, d in self._at_turn_history:
+                series.append(d.get(t, float("nan")))
+            ys.append(series)
+        chart = wandb.plot.line_series(
+            xs=steps,
+            ys=ys,
+            keys=keys,
+            title="Step reward by turn (multiple curves)",
+            xname="training step",
+        )
+        wandb.log({"reward/step_reward_by_turn": chart}, step=step)
+
     def finish(self, exit_code=0):
         import wandb
 
