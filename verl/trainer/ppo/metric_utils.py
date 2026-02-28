@@ -187,8 +187,7 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> Dict[str,
         **({f"episode/{k}": v[0].item() for k, v in batch.non_tensor_batch.items() if "success_rate" in k}),
     }
 
-    # --- Search env: step-level and terminal rewards (separate series in wandb) ---
-    # 只保留: 全局 mean/max/min + 样本间 per_trajectory_mean（每轨迹步奖励均值再平均），不按轮次拆
+    # --- Search env: 顺序 总奖励 -> 子奖励 (便于 wandb 分组查看) ---
     def _search_step_metrics(arr: np.ndarray, prefix: str) -> dict:
         out = {}
         valid = arr[np.isfinite(arr)]
@@ -203,6 +202,39 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> Dict[str,
     if traj_uid is not None and len(traj_uid) > 0:
         traj_uid = np.asarray(traj_uid, dtype=object)
 
+    # 1) 总奖励：终止奖励（回合结束时的任务分数）
+    if "terminal_reward" in batch.non_tensor_batch:
+        tr = batch.non_tensor_batch["terminal_reward"].astype(np.float64)
+        tr_valid = tr[np.isfinite(tr)]
+        if len(tr_valid) > 0:
+            metrics["reward/search_terminal_reward/mean"] = float(np.mean(tr_valid))
+            metrics["reward/search_terminal_reward/max"] = float(np.max(tr_valid))
+            metrics["reward/search_terminal_reward/min"] = float(np.min(tr_valid))
+
+    # 2) 总奖励：步奖励 R^t（含轮次分解 at_turn_*）
+    if "step_reward" in batch.non_tensor_batch:
+        sr = batch.non_tensor_batch["step_reward"].astype(np.float64)
+        if np.any(np.isfinite(sr)):
+            metrics.update(_search_step_metrics(sr, "reward/search_step_reward"))
+        if traj_uid is not None:
+            per_traj_sr = []
+            for uid in np.unique(traj_uid):
+                vals = sr[traj_uid == uid]
+                vals = vals[np.isfinite(vals)]
+                if len(vals) > 0:
+                    per_traj_sr.append(np.mean(vals))
+            if per_traj_sr:
+                metrics["reward/search_step_reward/per_trajectory_mean"] = float(np.mean(per_traj_sr))
+            step_index = np.zeros(len(traj_uid), dtype=np.int64)
+            for uid in np.unique(traj_uid):
+                mask = traj_uid == uid
+                step_index[mask] = np.arange(mask.sum())
+            for t in np.unique(step_index):
+                mt = (step_index == t) & np.isfinite(sr)
+                if mt.sum() > 0:
+                    metrics[f"reward/search_step_reward/at_turn_{int(t)}"] = float(np.mean(sr[mt]))
+
+    # 3) 子奖励：信息增益 Δ^t
     if "step_information_gain" in batch.non_tensor_batch:
         ig = batch.non_tensor_batch["step_information_gain"].astype(np.float64)
         if np.any(np.isfinite(ig)):
@@ -217,6 +249,7 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> Dict[str,
             if per_traj_ig:
                 metrics["reward/search_information_gain/per_trajectory_mean"] = float(np.mean(per_traj_ig))
 
+    # 4) 子奖励：冗余惩罚 p^t
     if "step_redundancy_penalty" in batch.non_tensor_batch:
         rp = batch.non_tensor_batch["step_redundancy_penalty"].astype(np.float64)
         if np.any(np.isfinite(rp)):
@@ -230,35 +263,6 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> Dict[str,
                     per_traj_rp.append(np.mean(vals))
             if per_traj_rp:
                 metrics["reward/search_redundancy_penalty/per_trajectory_mean"] = float(np.mean(per_traj_rp))
-
-    if "step_reward" in batch.non_tensor_batch:
-        sr = batch.non_tensor_batch["step_reward"].astype(np.float64)
-        if np.any(np.isfinite(sr)):
-            metrics.update(_search_step_metrics(sr, "reward/search_step_reward"))
-        if traj_uid is not None:
-            per_traj_sr = []
-            for uid in np.unique(traj_uid):
-                vals = sr[traj_uid == uid]
-                vals = vals[np.isfinite(vals)]
-                if len(vals) > 0:
-                    per_traj_sr.append(np.mean(vals))
-            if per_traj_sr:
-                metrics["reward/search_step_reward/per_trajectory_mean"] = float(np.mean(per_traj_sr))
-            # 轮次奖励：按步数 at_turn_0, at_turn_1, ... 记录，便于看步骤级奖励随轮次的变化
-            step_index = np.zeros(len(traj_uid), dtype=np.int64)
-            for uid in np.unique(traj_uid):
-                mask = traj_uid == uid
-                step_index[mask] = np.arange(mask.sum())
-            for t in np.unique(step_index):
-                mt = (step_index == t) & np.isfinite(sr)
-                if mt.sum() > 0:
-                    metrics[f"reward/search_step_reward/at_turn_{int(t)}"] = float(np.mean(sr[mt]))
-        tr = batch.non_tensor_batch["terminal_reward"].astype(np.float64)
-        tr_valid = tr[np.isfinite(tr)]
-        if len(tr_valid) > 0:
-            metrics["reward/search_terminal_reward/mean"] = float(np.mean(tr_valid))
-            metrics["reward/search_terminal_reward/max"] = float(np.max(tr_valid))
-            metrics["reward/search_terminal_reward/min"] = float(np.min(tr_valid))
 
     return metrics
 
