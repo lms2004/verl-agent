@@ -253,18 +253,20 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> Dict[str,
             if per_traj_ig:
                 metrics["reward/search_information_gain/per_trajectory_mean"] = float(np.mean(per_traj_ig))
 
-    # 4) 子奖励：冗余惩罚 p^t
+    # 4) 子奖励：冗余惩罚对 step reward 的贡献 = -λ*p^t（记为负值，不作为正向 reward）
     if "step_redundancy_penalty" in batch.non_tensor_batch:
         rp = batch.non_tensor_batch["step_redundancy_penalty"].astype(np.float64)
         if np.any(np.isfinite(rp)):
-            metrics.update(_search_step_metrics(rp, "reward/search_redundancy_penalty"))
+            # 取负：贡献 = -p_t，使指标 ≤0，与 reward 方向一致（正=好、负=罚）
+            rp_contribution = -rp
+            metrics.update(_search_step_metrics(rp_contribution, "reward/search_redundancy_penalty"))
         if traj_uid is not None:
             per_traj_rp = []
             for uid in np.unique(traj_uid):
                 vals = rp[traj_uid == uid]
                 vals = vals[np.isfinite(vals)]
                 if len(vals) > 0:
-                    per_traj_rp.append(np.mean(vals))
+                    per_traj_rp.append(-np.mean(vals))  # 贡献为负
             if per_traj_rp:
                 metrics["reward/search_redundancy_penalty/per_trajectory_mean"] = float(np.mean(per_traj_rp))
 
