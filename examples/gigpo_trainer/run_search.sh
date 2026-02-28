@@ -40,7 +40,7 @@ VAL_DATA=${VAL_DATA:-"./data/searchR1_processed_direct/test.parquet"}
 max_prompt_length=${MAX_PROMPT_LENGTH:-8192}
 max_response_length=${MAX_RESPONSE_LENGTH:-512}
 
-# PPO / 显存相关（A100 0.6B 约 60GB 峰值时可沿用当前默认）
+# PPO / 显存相关（A100 0.6B 约 60GB 峰值时可沿用当前默认；单卡 A100 80GB 跑 3B 见下方「单卡 80GB」）
 ppo_mini_batch_size=${PPO_MINI_BATCH_SIZE:-32}
 ppo_micro_batch_size_per_gpu=${PPO_MICRO_BATCH_SIZE_PER_GPU:-4}
 rollout_log_prob_micro_batch_per_gpu=${ROLLOUT_LOG_PROB_MICRO_BATCH_PER_GPU:-16}
@@ -92,6 +92,17 @@ trainer_nnodes=${TRAINER_NNODES:-1}
 # 环境: ENV_MAX_STEPS, ENV_HISTORY_LENGTH, GROUP_SIZE, ENV_SEARCH_URL, ENV_EMBED_URL, ENV_USE_INFORMATION_GAIN_REWARD, ENV_REDUNDANCY_PENALTY_LAMBDA
 # 模型/训练: MODEL_PATH, EXPERIMENT_NAME, ACTOR_LR, ACTOR_LR_WARMUP_RATIO, INVALID_ACTION_PENALTY_COEF, ALGORITHM_GAMMA, PARAM_OFFLOAD, OPTIMIZER_OFFLOAD
 # Trainer: TRAINER_SAVE_FREQ, TRAINER_TEST_FREQ, TRAINER_TOTAL_EPOCHS, TRAINER_VAL_BEFORE_TRAIN, TRAINER_LOG_VAL_GENERATIONS, TRAINER_VAL_ONLY, TRAINER_PROJECT_NAME, TRAINER_N_GPUS_PER_NODE, TRAINER_NNODES
+#
+# ========== 单卡 A100 80GB 跑 3B ==========
+# 可以跑。同一张卡会先做 rollout（vLLm）再做 PPO（FSDP），需在 rollout 后释放 vLLm 的 KV cache 才能安全做训练。
+# 推荐：FREE_CACHE_ENGINE=True（并会自动 ENFORCE_EAGER=True，略慢 rollout 但避免 OOM）。
+# 可选：适当减小 batch 留余量，例如 TRAIN_DATA_SIZE=8 PPO_MICRO_BATCH_SIZE_PER_GPU=2 GPU_MEMORY_UTILIZATION=0.45
+free_cache_engine=${FREE_CACHE_ENGINE:-False}
+enforce_eager=${ENFORCE_EAGER:-False}
+# vLLm 要求：free_cache_engine=True 时必须 enforce_eager=True
+if [ "$free_cache_engine" = "True" ] && [ "$enforce_eager" = "False" ]; then
+    enforce_eager=True
+fi
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=gigpo \
@@ -123,8 +134,8 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.gpu_memory_utilization=$gpu_memory_utilization \
     actor_rollout_ref.rollout.max_num_batched_tokens=$max_num_batched_tokens \
     actor_rollout_ref.rollout.enable_chunked_prefill=True \
-    actor_rollout_ref.rollout.enforce_eager=False \
-    actor_rollout_ref.rollout.free_cache_engine=False \
+    actor_rollout_ref.rollout.enforce_eager=$enforce_eager \
+    actor_rollout_ref.rollout.free_cache_engine=$free_cache_engine \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=$ref_log_prob_micro_batch_per_gpu \
     actor_rollout_ref.ref.fsdp_config.param_offload=$param_offload \
     actor_rollout_ref.actor.use_invalid_action_penalty=True \
