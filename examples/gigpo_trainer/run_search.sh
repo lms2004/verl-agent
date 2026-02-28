@@ -37,10 +37,13 @@ mode="mean_std_norm"
 enable_similarity=True
 similarity_thresh=0.9
 
-MODEL_PATH="./models/Qwen/Qwen2.5-3B-Instruct"
+# 模型路径：可直接改下面这行，或用环境变量覆盖。
+# 换模型时建议同时设 EXPERIMENT_NAME 以区分 wandb，例如:
+#   MODEL_PATH=./models/Qwen/Qwen2.5-7B-Instruct EXPERIMENT_NAME=gigpo_sim0.9_qwen2.5_7b ./run_search.sh
+MODEL_PATH=${MODEL_PATH:-"./models/Qwen/Qwen2.5-3B-Instruct"}
 
-TRAIN_DATA="./data/stepsearch_support_docs_processed/train.parquet"
-VAL_DATA="./data/stepsearch_support_docs_processed/test.parquet"
+TRAIN_DATA="./data/searchR1_processed_direct/train.parquet"
+VAL_DATA="./data/searchR1_processed_direct/test.parquet"
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=gigpo \
@@ -95,7 +98,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name='verl_agent_search' \
-    trainer.experiment_name='gigpo_sim0.9_qwen2.5_3b_instruct' \
+    trainer.experiment_name=${EXPERIMENT_NAME:-'gigpo_sim0.9_qwen2.5_3b_instruct'} \
     trainer.n_gpus_per_node=1 \
     trainer.nnodes=1 \
     trainer.save_freq=50 \

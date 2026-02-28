@@ -188,29 +188,65 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> Dict[str,
     }
 
     # --- Search env: step-level and terminal rewards (separate series in wandb) ---
+    # 只保留: 全局 mean/max/min + 样本间 per_trajectory_mean（每轨迹步奖励均值再平均），不按轮次拆
+    def _search_step_metrics(arr: np.ndarray, prefix: str) -> dict:
+        out = {}
+        valid = arr[np.isfinite(arr)]
+        if len(valid) == 0:
+            return out
+        out[f"{prefix}/mean"] = float(np.mean(valid))
+        out[f"{prefix}/max"] = float(np.max(valid))
+        out[f"{prefix}/min"] = float(np.min(valid))
+        return out
+
+    traj_uid = batch.non_tensor_batch.get("traj_uid")
+    if traj_uid is not None and len(traj_uid) > 0:
+        traj_uid = np.asarray(traj_uid, dtype=object)
+
     if "step_information_gain" in batch.non_tensor_batch:
-        ig = batch.non_tensor_batch["step_information_gain"]
-        ig_valid = ig[np.isfinite(ig)]
-        if len(ig_valid) > 0:
-            metrics["reward/search_information_gain/mean"] = float(np.mean(ig_valid))
-            metrics["reward/search_information_gain/max"] = float(np.max(ig_valid))
-            metrics["reward/search_information_gain/min"] = float(np.min(ig_valid))
+        ig = batch.non_tensor_batch["step_information_gain"].astype(np.float64)
+        if np.any(np.isfinite(ig)):
+            metrics.update(_search_step_metrics(ig, "reward/search_information_gain"))
+        if traj_uid is not None:
+            per_traj_ig = []
+            for uid in np.unique(traj_uid):
+                vals = ig[traj_uid == uid]
+                vals = vals[np.isfinite(vals)]
+                if len(vals) > 0:
+                    per_traj_ig.append(np.mean(vals))
+            if per_traj_ig:
+                metrics["reward/search_information_gain/per_trajectory_mean"] = float(np.mean(per_traj_ig))
+
     if "step_redundancy_penalty" in batch.non_tensor_batch:
-        rp = batch.non_tensor_batch["step_redundancy_penalty"]
-        rp_valid = rp[np.isfinite(rp)]
-        if len(rp_valid) > 0:
-            metrics["reward/search_redundancy_penalty/mean"] = float(np.mean(rp_valid))
-            metrics["reward/search_redundancy_penalty/max"] = float(np.max(rp_valid))
-            metrics["reward/search_redundancy_penalty/min"] = float(np.min(rp_valid))
+        rp = batch.non_tensor_batch["step_redundancy_penalty"].astype(np.float64)
+        if np.any(np.isfinite(rp)):
+            metrics.update(_search_step_metrics(rp, "reward/search_redundancy_penalty"))
+        if traj_uid is not None:
+            per_traj_rp = []
+            for uid in np.unique(traj_uid):
+                vals = rp[traj_uid == uid]
+                vals = vals[np.isfinite(vals)]
+                if len(vals) > 0:
+                    per_traj_rp.append(np.mean(vals))
+            if per_traj_rp:
+                metrics["reward/search_redundancy_penalty/per_trajectory_mean"] = float(np.mean(per_traj_rp))
+
     if "step_reward" in batch.non_tensor_batch:
-        sr = batch.non_tensor_batch["step_reward"]
-        sr_valid = sr[np.isfinite(sr)]
-        if len(sr_valid) > 0:
-            metrics["reward/search_step_reward/mean"] = float(np.mean(sr_valid))
-            metrics["reward/search_step_reward/max"] = float(np.max(sr_valid))
-            metrics["reward/search_step_reward/min"] = float(np.min(sr_valid))
+        sr = batch.non_tensor_batch["step_reward"].astype(np.float64)
+        if np.any(np.isfinite(sr)):
+            metrics.update(_search_step_metrics(sr, "reward/search_step_reward"))
+        if traj_uid is not None:
+            per_traj_sr = []
+            for uid in np.unique(traj_uid):
+                vals = sr[traj_uid == uid]
+                vals = vals[np.isfinite(vals)]
+                if len(vals) > 0:
+                    per_traj_sr.append(np.mean(vals))
+            if per_traj_sr:
+                metrics["reward/search_step_reward/per_trajectory_mean"] = float(np.mean(per_traj_sr))
+
     if "terminal_reward" in batch.non_tensor_batch:
-        tr = batch.non_tensor_batch["terminal_reward"]
+        tr = batch.non_tensor_batch["terminal_reward"].astype(np.float64)
         tr_valid = tr[np.isfinite(tr)]
         if len(tr_valid) > 0:
             metrics["reward/search_terminal_reward/mean"] = float(np.mean(tr_valid))
