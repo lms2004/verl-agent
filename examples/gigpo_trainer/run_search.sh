@@ -62,6 +62,9 @@ env_search_url=${ENV_SEARCH_URL:-"http://127.0.0.1:8000/retrieve"}
 env_embed_url=${ENV_EMBED_URL:-"http://127.0.0.1:8000/embed"}
 env_use_information_gain_reward=${ENV_USE_INFORMATION_GAIN_REWARD:-True}
 env_redundancy_penalty_lambda=${ENV_REDUNDANCY_PENALTY_LAMBDA:-0.5}
+# 最终结果正确 vs 步级信息增益 权重：terminal 调高、step 调低，使“答对”为主目标
+env_terminal_reward_scale=${ENV_TERMINAL_REWARD_SCALE:-10}
+env_step_reward_scale=${ENV_STEP_REWARD_SCALE:-0.2}
 
 # 模型与训练
 MODEL_PATH=${MODEL_PATH:-"./models/Qwen/Qwen2.5-3B-Instruct"}
@@ -89,7 +92,7 @@ trainer_nnodes=${TRAINER_NNODES:-1}
 # 长度: MAX_PROMPT_LENGTH, MAX_RESPONSE_LENGTH
 # PPO/显存: PPO_MINI_BATCH_SIZE, PPO_MICRO_BATCH_SIZE_PER_GPU, ROLLOUT_LOG_PROB_MICRO_BATCH_PER_GPU, REF_LOG_PROB_MICRO_BATCH_PER_GPU, GPU_MEMORY_UTILIZATION, MAX_NUM_BATCHED_TOKENS
 # GiGPO: GIGPO_MODE, GIGPO_ENABLE_SIMILARITY, GIGPO_SIMILARITY_THRESH
-# 环境: ENV_MAX_STEPS, ENV_HISTORY_LENGTH, GROUP_SIZE, ENV_SEARCH_URL, ENV_EMBED_URL, ENV_USE_INFORMATION_GAIN_REWARD, ENV_REDUNDANCY_PENALTY_LAMBDA
+# 环境: ENV_MAX_STEPS, ENV_HISTORY_LENGTH, GROUP_SIZE, ENV_SEARCH_URL, ENV_EMBED_URL, ENV_USE_INFORMATION_GAIN_REWARD, ENV_REDUNDANCY_PENALTY_LAMBDA, ENV_TERMINAL_REWARD_SCALE, ENV_STEP_REWARD_SCALE
 # 模型/训练: MODEL_PATH, EXPERIMENT_NAME, ACTOR_LR, ACTOR_LR_WARMUP_RATIO, INVALID_ACTION_PENALTY_COEF, ALGORITHM_GAMMA, PARAM_OFFLOAD, OPTIMIZER_OFFLOAD
 # Trainer: TRAINER_SAVE_FREQ, TRAINER_TEST_FREQ, TRAINER_TOTAL_EPOCHS, TRAINER_VAL_BEFORE_TRAIN, TRAINER_LOG_VAL_GENERATIONS, TRAINER_VAL_ONLY, TRAINER_PROJECT_NAME, TRAINER_N_GPUS_PER_NODE, TRAINER_NNODES
 
@@ -144,6 +147,8 @@ python3 -m verl.trainer.main_ppo \
     env.search.embed_url="$env_embed_url" \
     env.search.use_information_gain_reward=$env_use_information_gain_reward \
     env.search.redundancy_penalty_lambda=$env_redundancy_penalty_lambda \
+    env.search.terminal_reward_scale=$env_terminal_reward_scale \
+    env.search.step_reward_scale=$env_step_reward_scale \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
     trainer.project_name=$trainer_project_name \

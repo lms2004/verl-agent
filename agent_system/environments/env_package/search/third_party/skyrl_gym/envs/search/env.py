@@ -35,6 +35,10 @@ class SearchEnv(BaseTextEnv):
         self._redundancy_penalty_lambda = float(getattr(env_config, "redundancy_penalty_lambda", 0.0))
         self._embed_url = (getattr(env_config, "embed_url", None) or "").strip() or None
         
+        # Reward weights: terminal (final outcome) should dominate; step reward is fine-grained shaping.
+        self._terminal_reward_scale = float(getattr(env_config, "terminal_reward_scale", 1.0))
+        self._step_reward_scale = float(getattr(env_config, "step_reward_scale", 1.0))
+        
     def reset(self, extras: Dict[str, Any] = {}) -> None:
         assert "ground_truth" in extras, "ground_truth is required in extras field"
         self.ground_truth = extras["ground_truth"]
@@ -134,14 +138,16 @@ class SearchEnv(BaseTextEnv):
         reward = self._get_reward(action, done)
 
         if done:
+            # Scale terminal reward so "final result correct" dominates over step-level rewards
+            scaled_reward = reward * self._terminal_reward_scale
             return BaseTextEnvStepOutput(
                 observations=[],
-                reward=reward,
+                reward=scaled_reward,
                 done=done,
                 metadata={
                     "data_source": self.data_source,
                     "tool_calling": False,
-                    "terminal_reward": reward,
+                    "terminal_reward": scaled_reward,
                 },
                 postprocessed_action=action,
             )
@@ -179,7 +185,8 @@ class SearchEnv(BaseTextEnv):
                     )
                     info["information_gain"] = delta_t
                     info["redundancy_penalty"] = p_t
-                    info["step_reward"] = reward  # R^t = Δ^t - λ*p^t
+                    # Scale step reward (fine-grained shaping); terminal reward scale is applied when done
+                    info["step_reward"] = reward * self._step_reward_scale  # R^t = (Δ^t - λ*p^t) * scale
 
         # Wrap the observation properly as a message
         if observation:
